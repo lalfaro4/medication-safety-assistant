@@ -23,3 +23,16 @@ medication-safety-assistant/
 ├── data/
 ├── docs/
 └── README.md
+```
+
+## Backend Setup Instructions
+- cd to backend
+- pip install -r requirements.txt
+- python run.py
+-- to run the Flask backend at http://127.0.0.1:5000
+- Can test the backend health route here: http://127.0.0.1:5000/api/health
+
+## Frontend Setup Instructions
+- cd to frontend
+- npm install
+- npm start (this starts the react frontend which should run at http://localhost:3000)

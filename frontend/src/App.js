@@ -14,23 +14,20 @@ function App() {
   }, []);
 
   return (
-    <div className="App">
+    <div className="app">
       <header className="App-header">
         <img src={logo} className="App-logo" alt="logo" />
-        <h1>Medication Safety Assistant</h1>
-        <p>Frontend is running.</p>
+        <h1 className="mb-3">Medication Safety Assistant</h1>
+        <p className="lead">Frontend is running with Bootstrap.</p>
 
         // button to test flask and cors is running and if frontend reaches backend
-      <a href="http://127.0.0.1:5000/api/health" target="_blank" rel="noreferrer">
-        <button
-          style={{
-            padding: "10px 16px",
-            fontSize: "16px",
-            cursor: "pointer"
-          }}
-        >
+      <a
+      href="http://127.0.0.1:5000/api/health"
+      target="_blank"
+      rel="noreferrer"
+      className="btn btn-primary"
+      >
           Check Backend Health
-        </button>
       </a>
         <a
           className="App-link"

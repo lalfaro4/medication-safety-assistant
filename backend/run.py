@@ -1,18 +1,29 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, session
 from flask_cors import CORS
+from werkzeug.security import generate_password_hash, check_password_hash
 import requests
 import sqlite3
 from pathlib import Path
+import secrets
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, supports_credentials=True, origins=["http://localhost:3000"])
+
+app.config["SECRET_KEY"] = "a93078317010017de2d299609e21c07972acb982531748c7da06c42635009e99"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = False  # True when using HTTPS
+
 
 RXNAV_BASE = "https://rxnav.nlm.nih.gov/REST"
-COMPARE_API_BASE = "http://127.0.0.1:5001/api"
+COMPARE_API_BASE = "http://localhost:5001/api"
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "medications.db"
 
+# used to generate the secret key
+# have it in here instead of env file sice not focus of project/simplicity
+# print(secrets.token_hex(32))
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
@@ -127,13 +138,15 @@ def health():
 
 @app.route("/api/register", methods=["POST"])
 def register():
-    data = request.get_json()
+    data = request.get_json() or {}
     name = data.get("name", "").strip()
-    email = data.get("email", "").strip()
+    email = data.get("email", "").strip().lower()
     password = data.get("password", "").strip()
 
     if not name or not email or not password:
         return jsonify({"error": "All fields are required."}), 400
+
+    password_hashed = generate_password_hash(password)
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -141,7 +154,7 @@ def register():
     try:
         cursor.execute(
             "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
-            (name, email, password)
+            (name, email, password_hashed)
         )
         conn.commit()
         return jsonify({"message": "Account successfully created."}), 201
@@ -152,19 +165,25 @@ def register():
 
 @app.route("/api/login", methods=["POST"])
 def login():
-    data = request.get_json()
-    email = data.get("email", "").strip()
+    data = request.get_json() or {}
+    email = data.get("email", "").strip().lower()
     password = data.get("password", "").strip()
 
     conn = get_db_connection()
     cursor = conn.cursor()
 
     user = cursor.execute(
-        "SELECT * FROM users WHERE email = ? AND password = ?",
-        (email, password)
+        "SELECT * FROM users WHERE email = ?",
+        (email,)
     ).fetchone()
 
     conn.close()
+
+    if user is None or not check_password_hash(user["password"], password):
+        return jsonify({"error": "Invalid email or password."}), 401
+
+    session.clear()
+    session["user_id"] = user["id"]
 
     if user:
         return jsonify({
@@ -176,8 +195,35 @@ def login():
             }
         })
 
-    return jsonify({"error": "Invalid email or password."}), 401
-    
+@app.route("/api/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return jsonify({"message": "Logout successful."}), 200
+
+
+@app.route("/api/me", methods=["GET"])
+def me():
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"authenticated": False}), 401
+
+    conn = get_db_connection()
+    user = conn.execute(
+        "SELECT id, name, email FROM users WHERE id = ?",
+        (user_id,)
+    ).fetchone()
+    conn.close()
+
+    if not user:
+        session.clear()
+        return jsonify({"authenticated": False}), 401
+
+    return jsonify({"authenticated": True, "user": dict(user)})
+
+def get_logged_in_user():
+    user_id = session.get("user_id")
+    return user_id
+
 @app.route("/api/medications/search")
 def search_medications():
     query = request.args.get("q", "").strip()
@@ -250,33 +296,38 @@ def search_medications():
         
 @app.route("/api/medications", methods=["POST"])
 def add_medication():
-    data = request.get_json()
+    user_id = get_logged_in_user()
+    if not user_id:
+        return jsonify({"error": "Unauthorized"}), 401
 
+    data = request.get_json()
     if not data:
         return jsonify({"error": "Missing JSON body"}), 400
 
-    user_id = data.get("user_id")
     rxcui = data.get("rxcui")
     name = data.get("name")
     tty = data.get("tty")
     synonym = data.get("synonym")
     score = data.get("score")
+
     print("PARSED VALUES:", user_id, rxcui, name)
 
-    if not user_id or not rxcui or not name:
-        return jsonify({"error": "user_id, rxcui, and name are required"}), 400
+    if not rxcui or not name:
+        return jsonify({"error": "rxcui and name are required"}), 400
 
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
         cursor.execute("""
-            INSERT INTO medications (user_id, rxcui, name, tty, synonym, score)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (user_id, rxcui, name, tty, synonym, score))
+                       INSERT INTO medications (user_id, rxcui, name, tty, synonym, score)
+                       VALUES (?, ?, ?, ?, ?, ?)
+                       """, (user_id, rxcui, name, tty, synonym, score))
 
         conn.commit()
         new_id = cursor.lastrowid
+
+        interaction_check = check_new_medication_against_saved(name, new_id, user_id)
 
         return jsonify({
             "message": "Medication saved successfully",
@@ -288,7 +339,8 @@ def add_medication():
                 "tty": tty,
                 "synonym": synonym,
                 "score": score
-            }
+            },
+            "interactionCheck": interaction_check
         }), 201
 
     except sqlite3.IntegrityError:
@@ -301,9 +353,9 @@ def add_medication():
 
 @app.route("/api/medications", methods=["GET"])
 def get_medications():
-    user_id = request.args.get("user_id")
+    user_id = get_logged_in_user()
     if not user_id:
-        return jsonify({"error": "user_id is missing"}), 400
+        return jsonify({"error": "Unauthorized"}), 401
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -324,8 +376,9 @@ def get_medications():
     
 @app.route("/api/medications/<int:medication_id>", methods=["DELETE"])
 def delete_medication(medication_id):
-    user_id = request.args.get("user_id")
-    if not user_id: return jsonify({"error": "user_id is missing"}), 400
+    user_id = get_logged_in_user()
+    if not user_id:
+        return jsonify({"error": "Unauthorized"}), 401
 
     conn = get_db_connection()
     cursor = conn.cursor()

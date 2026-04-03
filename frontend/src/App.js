@@ -30,8 +30,9 @@ function App() {
   const loadMedications = async (userId) => {
     try {
       const res = await fetch(
-        `http://127.0.0.1:5000/api/medications?user_id=${userId}`
-      );
+        `http://localhost:5000/api/medications`, {
+            credentials: "include"
+          });
       const data = await res.json();
 
       if (!res.ok) {
@@ -44,15 +45,27 @@ function App() {
       setError(err.message || "Could not load saved medications.");
     }
   };
-  useEffect(() => {
-    const savedUser = localStorage.getItem("currentUser");
 
-    if (savedUser) {
-      const parsedUser = JSON.parse(savedUser);
-      setCurrentUser(parsedUser);
-      setLoggedIn(true);
-    }
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const response = await fetch("http://localhost:5000/api/me", {
+          credentials: "include"
+        });
+        const data = await response.json();
+
+        if (response.ok && data.authenticated) {
+          setCurrentUser(data.user);
+          setLoggedIn(true);
+        }
+      } catch (err) {
+        console.error("Session check failed:", err);
+      }
+    };
+
+    checkSession();
   }, []);
+
   useEffect(() => {
     if (loggedIn && currentUser) {
       loadMedications(currentUser.id);
@@ -90,11 +103,12 @@ function App() {
     setMessage("");
 
     try {
-      const response = await fetch("http://127.0.0.1:5000/api/login", {
+      const response = await fetch("http://localhost:5000/api/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include",
         body: JSON.stringify({ email, password }),
       });
 
@@ -106,7 +120,6 @@ function App() {
 
       setCurrentUser(data.user);
       setLoggedIn(true);
-      localStorage.setItem("currentUser", JSON.stringify(data.user))
       setMessage(data.message || "Login successful.");
     } catch (err) {
       setError(err.message || "Login failed.");
@@ -119,11 +132,12 @@ function App() {
     setMessage("");
 
     try {
-      const response = await fetch("http://127.0.0.1:5000/api/register", {
+      const response = await fetch("http://localhost:5000/api/register", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include",
         body: JSON.stringify({ name, email, password }),
       });
 
@@ -143,7 +157,11 @@ function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await fetch("http://localhost:5000/api/logout", {
+      method: "POST",
+      credentials: "include",
+    })
     setLoggedIn(false);
     setCurrentUser(null);
     setEmail("");
@@ -158,7 +176,6 @@ function App() {
     setDrugB("");
     setComparisonResult(null);
     setNewInteractionReport(null);
-    localStorage.removeItem("currentUser")
   };
 
   const handleSearch = async () => {
@@ -174,7 +191,7 @@ function App() {
 
     try {
       const res = await fetch(
-        `http://127.0.0.1:5000/api/medications/search?q=${encodeURIComponent(query)}`
+        `http://localhost:5000/api/medications/search?q=${encodeURIComponent(query)}`
       );
       const data = await res.json();
 
@@ -207,7 +224,6 @@ function App() {
     }
 
     const payload = {
-      user_id: currentUser.id,
       rxcui: med.rxcui,
       name: med.name,
       tty: med.tty,
@@ -216,11 +232,12 @@ function App() {
     };
 
     try {
-      const res = await fetch("http://127.0.0.1:5000/api/medications", {
+      const res = await fetch("http://localhost:5000/api/medications", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
 
@@ -246,9 +263,10 @@ function App() {
 
     try {
       const res = await fetch(
-        `http://127.0.0.1:5000/api/medications/${id}?user_id=${currentUser.id}`,
+        `http://localhost:5000/api/medications/${id}`,
         {
           method: "DELETE",
+          credentials: "include"
         }
       );
 
@@ -278,7 +296,7 @@ function App() {
 
     try {
       const res = await fetch(
-        `http://127.0.0.1:5001/api/compare-drugs?drugA=${encodeURIComponent(
+        `http://localhost:5001/api/compare-drugs?drugA=${encodeURIComponent(
           drugA
         )}&drugB=${encodeURIComponent(drugB)}`
       );

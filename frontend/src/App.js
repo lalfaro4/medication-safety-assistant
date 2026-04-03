@@ -4,6 +4,7 @@ import "./App.css";
 
 function App() {
   const [loggedIn, setLoggedIn] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isRegistering, setIsRegistering] = useState(false);
@@ -27,7 +28,8 @@ function App() {
   const [showMessage, setShowMessage] = useState(false);
   const [showInteractionReport, setShowInteractionReport] = useState(false);
 
-  const loadMedications = async (userId) => {
+
+  const loadMedications = async () => {
     try {
       const res = await fetch(
         `http://localhost:5000/api/medications`, {
@@ -60,6 +62,8 @@ function App() {
         }
       } catch (err) {
         console.error("Session check failed:", err);
+      } finally {
+        setAuthChecked(true);
       }
     };
 
@@ -328,6 +332,29 @@ function App() {
       handleSearch();
     }
   };
+
+if (!authChecked) {
+  return (
+    <div className="app-shell">
+      <div className="container py-5">
+        <div
+          className="search-card mx-auto text-center"
+          style={{ maxWidth: "450px" }}
+        >
+          <h1 className="mb-3">Medication Safety Assistant</h1>
+          <p className="text-muted mb-4">Loading...</p>
+
+          <div className="spinner-border text-primary"
+               style={{ width: "5rem", height: "5rem" }}
+               role="status"
+          >
+            <span className="visually-hidden">Loading...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 if (!loggedIn) {
     return (

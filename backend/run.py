@@ -58,6 +58,18 @@ def init_db():
     )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS medication_schedules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            medication_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            day_of_week TEXT NOT NULL,
+            time_of_day TEXT NOT NULL,
+            FOREIGN KEY (medication_id) REFERENCES medications(id)
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+
 
     
 
@@ -395,7 +407,118 @@ def delete_medication(medication_id):
     conn.close()
 
     return jsonify({"message": "Medication deleted successfully"})
-    
+
+@app.route("/api/medications/<int:medication_id>/schedule", methods=["POST"])
+def add_medication_schedule(medication_id):
+    user_id = get_logged_in_user()
+    if not user_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json() or {}
+    day_of_week = data.get("day_of_week")
+    time_of_day = data.get("time_of_day")
+
+    if not day_of_week or not time_of_day:
+        return jsonify({"error": "day_of_week and time_of_day required"}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    medication = cursor.execute("""
+        SELECT id FROM medications
+        WHERE id = ? AND user_id = ?
+        """,(medication_id, user_id)).fetchone()
+
+    if not medication:
+        conn.close()
+        return jsonify({"error": "Medication not found"}), 404
+
+    cursor.execute("""
+        INSERT INTO medication_schedules (medication_id, user_id, day_of_week, time_of_day)
+        VALUES (?, ?, ?, ?)
+         """, (medication_id, user_id, day_of_week, time_of_day))
+
+    conn.commit()
+    schedule_id = cursor.lastrowid
+    conn.close()
+
+    return jsonify({"message": "Schedule saved",
+                    "Schedule": {
+                        "id": schedule_id,
+                        "medication_id": medication_id,
+                        "day_of_week": day_of_week,
+                        "time_of_day": time_of_day
+                    }}), 201
+
+@app.route("/api/medications/<int:medication_id>/schedule", methods=["GET"])
+def get_medication_schedule(medication_id):
+    user_id = get_logged_in_user()
+    if not user_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    medication = cursor.execute("""
+        SELECT id FROM medications
+        WHERE id = ? AND user_id = ?
+        """, (medication_id, user_id)).fetchone()
+
+    if not medication:
+        conn.close()
+        return jsonify({"error": "Medication not found"}), 404
+
+    rows = cursor.execute("""
+        SELECT id, day_of_week, time_of_day
+        FROM medication_schedules
+        WHERE medication_id = ? AND user_id = ?
+        ORDER BY
+            CASE day_of_week
+                WHEN 'Monday' THEN 1
+                WHEN 'Tuesday' THEN 2
+                WHEN 'Wednesday' THEN 3
+                WHEN 'Thursday' THEN 4
+                WHEN 'Friday' THEN 5
+                WHEN 'Saturday' THEN 6
+                WHEN 'Sunday' THEN 7
+            END,
+            time_of_day
+        """, (medication_id, user_id)).fetchall()
+
+    conn.close()
+
+    return jsonify({"schedule": [dict(row) for row in rows]})
+
+
+@app.route("/api/medication-schedules/<int:schedule_id>", methods=["DELETE"])
+def delete_medication_schedule(schedule_id):
+    user_id = get_logged_in_user()
+    if not user_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    schedule = cursor.execute("""
+        SELECT id FROM medication_schedules
+        WHERE id = ? AND user_id = ?
+    """, (schedule_id, user_id)).fetchone()
+
+    if not schedule:
+        conn.close()
+        return jsonify({"error": "Schedule entry not found"}), 404
+
+    cursor.execute("""
+        DELETE FROM medication_schedules
+        WHERE id = ? AND user_id = ?
+    """, (schedule_id, user_id))
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({"message": "Schedule entry deleted successfully"})
+
+
 init_db()
 
 if __name__ == "__main__":

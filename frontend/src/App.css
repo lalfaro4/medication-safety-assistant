@@ -390,3 +390,17 @@ li {
 .alert-close-btn:hover {
   opacity: 0.7;
 }
+
+.schedule-time-input {
+  max-width: 160px;
+  border-radius: 12px;
+  min-height: 44px;
+  font-weight: 500;
+}
+
+.schedule-select {
+  max-width: 170px;
+  border-radius: 12px;
+  min-height: 44px;
+  font-weight: 500;
+}

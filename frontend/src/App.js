@@ -28,6 +28,8 @@ function App() {
   const [showMessage, setShowMessage] = useState(false);
   const [showInteractionReport, setShowInteractionReport] = useState(false);
 
+  const [schedules, setSchedules] = useState({});
+  const [scheduleForm, setScheduleForm] = useState({});
 
   const loadMedications = async () => {
     try {
@@ -40,8 +42,12 @@ function App() {
       if (!res.ok) {
         throw new Error(data.error || "Could not load saved medications.");
       }
+      const meds = data.medications || [];
+      setMedications(meds);
 
-      setMedications(data.medications || []);
+      for (const med of meds) {
+      loadSchedule(med.id);
+      }
     } catch (err) {
       console.error(err);
       setError(err.message || "Could not load saved medications.");
@@ -326,6 +332,94 @@ function App() {
       setNewInteractionReport(null);
     }, 350);
   };
+  const handleAddSchedule = async (medicationId) => {
+    const form = scheduleForm[medicationId] || {};
+    const day_of_week = form.day_of_week || "";
+    const time_of_day = form.time_of_day || "";
+
+    if (!day_of_week || !time_of_day) {
+      setError("Please choose a day and time.");
+      return;
+    }
+
+    try {
+      const res = await fetch(
+        `http://localhost:5000/api/medications/${medicationId}/schedule`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          credentials: "include",
+          body: JSON.stringify({ day_of_week, time_of_day })
+        }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Could not add schedule.");
+      }
+
+      setMessage(data.message || "Schedule added.");
+      setScheduleForm((prev) => ({
+        ...prev,
+        [medicationId]: { day_of_week: "", time_of_day: "" }
+      }));
+
+      await loadSchedule(medicationId);
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "Could not add schedule.");
+    }
+  };
+
+  const handleDeleteSchedule = async (medicationId, scheduleId) => {
+    try {
+      const res = await fetch(
+        `http://localhost:5000/api/medication-schedules/${scheduleId}`,
+        {
+          method: "DELETE",
+          credentials: "include"
+        }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Could not delete schedule.");
+      }
+
+      setMessage(data.message || "Schedule deleted.");
+      await loadSchedule(medicationId);
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "Could not delete schedule.");
+    }
+  };
+
+
+  const loadSchedule = async (medicationId) => {
+  try {
+    const res = await fetch(
+      `http://localhost:5000/api/medications/${medicationId}/schedule`,
+      { credentials: "include" }
+    );
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || "Could not load schedule.");
+    }
+
+    setSchedules((prev) => ({
+      ...prev,
+      [medicationId]: data.schedule || []
+    }));
+  } catch (err) {
+    console.error(err);
+  }
+};
 
   const handleKeyDown = (event) => {
     if (event.key === "Enter") {
@@ -536,6 +630,81 @@ if (!loggedIn) {
                     <div className="med-meta">RxCUI: {med.rxcui}</div>
                     {med.synonym && <div className="med-meta">Synonym: {med.synonym}</div>}
                     {med.tty && <div className="med-meta">Type: {med.tty}</div>}
+
+                    <div className="mt-3">
+                      <h5 className="mb-2">Schedule</h5>
+
+                      {schedules[med.id]?.length > 0 ? (
+                        <ul className="list-unstyled mb-3">
+                          {schedules[med.id].map((entry) => (
+                            <li
+                              key={entry.id}
+                              className="d-flex justify-content-between align-items-center mb-2"
+                            >
+                              <span>
+                                {entry.day_of_week} — {entry.time_of_day}
+                              </span>
+                              <button
+                                className="btn btn-sm btn-outline-danger"
+                                onClick={() => handleDeleteSchedule(med.id, entry.id)}
+                              >
+                                Remove
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-muted mb-3">No schedule added yet.</p>
+                      )}
+
+                      <div className="d-flex gap-2 flex-wrap">
+                        <select
+                          className="form-select schedule-select"
+                          style={{ maxWidth: "160px" }}
+                          value={scheduleForm[med.id]?.day_of_week || ""}
+                          onChange={(e) =>
+                            setScheduleForm((prev) => ({
+                              ...prev,
+                              [med.id]: {
+                                ...prev[med.id],
+                                day_of_week: e.target.value
+                              }
+                            }))
+                          }
+                        >
+                          <option value="">Day</option>
+                          <option value="Monday">Monday</option>
+                          <option value="Tuesday">Tuesday</option>
+                          <option value="Wednesday">Wednesday</option>
+                          <option value="Thursday">Thursday</option>
+                          <option value="Friday">Friday</option>
+                          <option value="Saturday">Saturday</option>
+                          <option value="Sunday">Sunday</option>
+                        </select>
+
+                        <input
+                          type="time"
+                          className="form-control schedule-time-input"
+                          value={scheduleForm[med.id]?.time_of_day || ""}
+                          onChange={(e) =>
+                            setScheduleForm((prev) => ({
+                              ...prev,
+                              [med.id]: {
+                                ...prev[med.id],
+                                time_of_day: e.target.value
+                              }
+                            }))
+                          }
+                        />
+
+                        <button
+                          className="btn btn-sm btn-outline-success"
+                          onClick={() => handleAddSchedule(med.id)}
+                        >
+                          Add Schedule
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
                   <button

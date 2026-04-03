@@ -44,7 +44,16 @@ function App() {
       setError(err.message || "Could not load saved medications.");
     }
   };
-useEffect(() => {
+  useEffect(() => {
+    const savedUser = localStorage.getItem("currentUser");
+
+    if (savedUser) {
+      const parsedUser = JSON.parse(savedUser);
+      setCurrentUser(parsedUser);
+      setLoggedIn(true);
+    }
+  }, []);
+  useEffect(() => {
     if (loggedIn && currentUser) {
       loadMedications(currentUser.id);
     }
@@ -97,6 +106,7 @@ useEffect(() => {
 
       setCurrentUser(data.user);
       setLoggedIn(true);
+      localStorage.setItem("currentUser", JSON.stringify(data.user))
       setMessage(data.message || "Login successful.");
     } catch (err) {
       setError(err.message || "Login failed.");
@@ -148,6 +158,7 @@ useEffect(() => {
     setDrugB("");
     setComparisonResult(null);
     setNewInteractionReport(null);
+    localStorage.removeItem("currentUser")
   };
 
   const handleSearch = async () => {

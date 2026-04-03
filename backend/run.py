@@ -8,6 +8,7 @@ app = Flask(__name__)
 CORS(app)
 
 RXNAV_BASE = "https://rxnav.nlm.nih.gov/REST"
+COMPARE_API_BASE = "http://127.0.0.1:5001/api"
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "medications.db"
@@ -22,26 +23,160 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL UNIQUE,
+            password TEXT NOT NULL
+        )
+    """)
     
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS medications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        rxcui TEXT NOT NULL UNIQUE,
+        user_id INTEGER NOT NULL,
+        rxcui TEXT NOT NULL,
         name TEXT NOT NULL,
         tty TEXT,
         synonym TEXT,
-        score TEXT
-        )
+        score TEXT,
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        UNIQUE(user_id, rxcui)
+    )
     """)
+
+
     
 
     conn.commit()
     conn.close()
 
+
+def check_new_medication_against_saved(new_med_name, new_med_id, user_id):
+    """
+    Compare the newly added medication against every other saved medication
+    using the Node/OpenFDA compare endpoint.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT id, rxcui, name, tty, synonym, score
+        FROM medications
+        WHERE id != ? AND user_id = ?
+        ORDER BY id DESC
+    """, (new_med_id, user_id))
+
+    other_meds = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+
+    interaction_results = []
+    compare_errors = []
+
+    for med in other_meds:
+        try:
+            response = requests.get(
+                f"{COMPARE_API_BASE}/compare-drugs",
+                params={
+                    "drugA": new_med_name,
+                    "drugB": med["name"]
+                },
+                timeout=20,
+            )
+
+            data = response.json()
+
+            if not response.ok:
+                compare_errors.append({
+                    "withMedication": med["name"],
+                    "error": data.get("error", "Comparison failed")
+                })
+                continue
+
+            comparison = data.get("comparison", {})
+            possible_interaction = comparison.get("possibleInteraction", False)
+
+            if possible_interaction:
+                interaction_results.append({
+                    "medicationId": med["id"],
+                    "medicationName": med["name"],
+                    "comparison": comparison,
+                    "drugADetails": data.get("drugADetails"),
+                    "drugBDetails": data.get("drugBDetails")
+                })
+
+        except requests.RequestException as e:
+            compare_errors.append({
+                "withMedication": med["name"],
+                "error": f"Could not reach comparison service: {str(e)}"
+            })
+
+    return {
+        "checkedAgainstCount": len(other_meds),
+        "interactionsFoundCount": len(interaction_results),
+        "interactions": interaction_results,
+        "compareErrors": compare_errors
+    }
+
  # test flask and cors is running
 @app.route("/api/health")
 def health():
     return jsonify({"status": "ok"})
+
+@app.route("/api/register", methods=["POST"])
+def register():
+    data = request.get_json()
+    name = data.get("name", "").strip()
+    email = data.get("email", "").strip()
+    password = data.get("password", "").strip()
+
+    if not name or not email or not password:
+        return jsonify({"error": "All fields are required."}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute(
+            "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
+            (name, email, password)
+        )
+        conn.commit()
+        return jsonify({"message": "Account successfully created."}), 201
+    except Exception:
+        return jsonify({"error": "User with that email already exists."}), 400
+    finally:
+        conn.close()
+
+@app.route("/api/login", methods=["POST"])
+def login():
+    data = request.get_json()
+    email = data.get("email", "").strip()
+    password = data.get("password", "").strip()
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    user = cursor.execute(
+        "SELECT * FROM users WHERE email = ? AND password = ?",
+        (email, password)
+    ).fetchone()
+
+    conn.close()
+
+    if user:
+        return jsonify({
+            "message": "Login successful.",
+            "user": {
+                "id": user["id"],
+                "name": user["name"],
+                "email": user["email"]
+            }
+        })
+
+    return jsonify({"error": "Invalid email or password."}), 401
     
 @app.route("/api/medications/search")
 def search_medications():
@@ -61,9 +196,7 @@ def search_medications():
         approx_response.raise_for_status()
         approx_data = approx_response.json()
 
-        candidates = (
-            approx_data.get("approximateGroup", {}).get("candidate", [])
-        )
+        candidates = approx_data.get("approximateGroup", {}).get("candidate", [])
 
         results = []
 
@@ -122,23 +255,25 @@ def add_medication():
     if not data:
         return jsonify({"error": "Missing JSON body"}), 400
 
+    user_id = data.get("user_id")
     rxcui = data.get("rxcui")
     name = data.get("name")
     tty = data.get("tty")
     synonym = data.get("synonym")
     score = data.get("score")
+    print("PARSED VALUES:", user_id, rxcui, name)
 
-    if not rxcui or not name:
-        return jsonify({"error": "rxcui and name are required"}), 400
+    if not user_id or not rxcui or not name:
+        return jsonify({"error": "user_id, rxcui, and name are required"}), 400
 
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
         cursor.execute("""
-            INSERT INTO medications (rxcui, name, tty, synonym, score)
-            VALUES (?, ?, ?, ?, ?)
-        """, (rxcui, name, tty, synonym, score))
+            INSERT INTO medications (user_id, rxcui, name, tty, synonym, score)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (user_id, rxcui, name, tty, synonym, score))
 
         conn.commit()
         new_id = cursor.lastrowid
@@ -147,6 +282,7 @@ def add_medication():
             "message": "Medication saved successfully",
             "id": new_id,
             "medication": {
+                "user_id": user_id,
                 "rxcui": rxcui,
                 "name": name,
                 "tty": tty,
@@ -165,14 +301,19 @@ def add_medication():
 
 @app.route("/api/medications", methods=["GET"])
 def get_medications():
+    user_id = request.args.get("user_id")
+    if not user_id:
+        return jsonify({"error": "user_id is missing"}), 400
+
     conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT id, rxcui, name, tty, synonym, score
+        SELECT id, user_id, rxcui, name, tty, synonym, score
         FROM medications
+        WHERE user_id = ?
         ORDER BY id DESC
-    """)
+    """, (user_id,))
 
     rows = cursor.fetchall()
     conn.close()
@@ -183,17 +324,20 @@ def get_medications():
     
 @app.route("/api/medications/<int:medication_id>", methods=["DELETE"])
 def delete_medication(medication_id):
+    user_id = request.args.get("user_id")
+    if not user_id: return jsonify({"error": "user_id is missing"}), 400
+
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT * FROM medications WHERE id = ?", (medication_id,))
+    cursor.execute("SELECT * FROM medications WHERE id = ? AND user_id = ?", (medication_id, user_id))
     medication = cursor.fetchone()
 
     if medication is None:
         conn.close()
         return jsonify({"error": "Medication not found"}), 404
 
-    cursor.execute("DELETE FROM medications WHERE id = ?", (medication_id,))
+    cursor.execute("DELETE FROM medications WHERE id = ? AND user_id = ?", (medication_id, user_id))
     conn.commit()
     conn.close()
 

@@ -66,7 +66,7 @@ def init_db():
             user_id INTEGER NOT NULL,
             day_of_week TEXT NOT NULL,
             time_of_day TEXT NOT NULL,
-            FOREIGN KEY (medication_id) REFERENCES medications(id)
+            FOREIGN KEY (medication_id) REFERENCES medications(id),
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)

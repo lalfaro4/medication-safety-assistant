@@ -19,8 +19,8 @@ CORS(app, supports_credentials=True, origins=[FRONTEND_ORIGIN])
 
 app.config["SECRET_KEY"] = "a93078317010017de2d299609e21c07972acb982531748c7da06c42635009e99"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = False  # True when using HTTPS
+app.config["SESSION_COOKIE_SAMESITE"] = "None"
+app.config["SESSION_COOKIE_SECURE"] = True  # True when using HTTPS
 
 
 RXNAV_BASE = "https://rxnav.nlm.nih.gov/REST"

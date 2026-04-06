@@ -11,7 +11,7 @@ app = Flask(__name__)
 
 
 FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "https://medication-safety-assistant-production.up.railway.app")
-COMPARE_API_BASE = os.environ.get("COMPARE_API_BASE", "COMPARE_API_BASE=https://compare-api.up.railway.app/api")
+COMPARE_API_BASE = os.environ.get("COMPARE_API_BASE", "https://compare-api.up.railway.app/api")
 
 CORS(app, supports_credentials=True, origins=[FRONTEND_ORIGIN])
 

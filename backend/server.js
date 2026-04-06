@@ -11,8 +11,12 @@ app.use(express.json());
 // connect your route
 app.use("/api", interactionsRouter);
 
-const PORT = 5001;
+const PORT = process.env.PORT || 5001;
 
-app.listen(PORT, () => {
+app.get("/", (req, res) => {
+  res.send("Compare API is running");
+});
+
+app.listen(PORT,  "0.0.0.0", () => {
   console.log(`🚀 Backend running on http://localhost:${PORT}`);
 });

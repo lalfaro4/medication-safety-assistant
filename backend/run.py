@@ -8,7 +8,14 @@ import os
 import secrets
 
 app = Flask(__name__)
-CORS(app, supports_credentials=True, origins=["http://localhost:3000"])
+
+
+FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "https://medication-safety-assistant-production.up.railway.app")
+COMPARE_API_BASE = os.environ.get("COMPARE_API_BASE", "http://localhost:5001/api")
+
+CORS(app, supports_credentials=True, origins=[FRONTEND_ORIGIN])
+
+# CORS(app, supports_credentials=True, origins=["http://localhost:3000"])
 
 app.config["SECRET_KEY"] = "a93078317010017de2d299609e21c07972acb982531748c7da06c42635009e99"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
@@ -17,7 +24,6 @@ app.config["SESSION_COOKIE_SECURE"] = False  # True when using HTTPS
 
 
 RXNAV_BASE = "https://rxnav.nlm.nih.gov/REST"
-COMPARE_API_BASE = "http://localhost:5001/api"
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "medications.db"

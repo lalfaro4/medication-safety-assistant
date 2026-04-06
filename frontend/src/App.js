@@ -335,7 +335,7 @@ function App() {
 
     try {
       const res = await fetch(
-        `${COMPARE_API_BASE}/api/compare-drugs?drugA=${encodeURIComponent(
+        `${COMPARE_API_BASE}/compare-drugs?drugA=${encodeURIComponent(
           drugA
         )}&drugB=${encodeURIComponent(drugB)}`
       );

@@ -1,6 +1,10 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import "bootstrap/dist/css/bootstrap.min.css";
 import "./App.css";
+
+const API_BASE = process.env.REACT_APP_API_BASE || "http://localhost:5000";
+const COMPARE_API_BASE = process.env.REACT_APP_COMPARE_API_BASE || "http://localhost:5001";
+
 
 function App() {
   const [loggedIn, setLoggedIn] = useState(false);
@@ -31,32 +35,51 @@ function App() {
   const [schedules, setSchedules] = useState({});
   const [scheduleForm, setScheduleForm] = useState({});
 
-  const API_BASE = process.env.REACT_APP_API_BASE || "http://localhost:5000";
 
-  const COMPARE_API_BASE = process.env.REACT_APP_COMPARE_API_BASE || "http://localhost:5001";
-
-  const loadMedications = async () => {
+    const loadSchedule = useCallback(async (medicationId) => {
     try {
       const res = await fetch(
-         `${API_BASE}/api/medications`, {
-            credentials: "include"
-          });
+        `${API_BASE}/api/medications/${medicationId}/schedule`,
+        { credentials: "include" }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Could not load schedule.");
+      }
+
+      setSchedules((prev) => ({
+        ...prev,
+        [medicationId]: data.schedule || []
+      }));
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
+  const loadMedications = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/medications`, {
+        credentials: "include"
+      });
       const data = await res.json();
 
       if (!res.ok) {
         throw new Error(data.error || "Could not load saved medications.");
       }
+
       const meds = data.medications || [];
       setMedications(meds);
 
       for (const med of meds) {
-      loadSchedule(med.id);
+        loadSchedule(med.id);
       }
     } catch (err) {
       console.error(err);
       setError(err.message || "Could not load saved medications.");
     }
-  };
+  }, [loadSchedule]);
 
   useEffect(() => {
     const checkSession = async () => {
@@ -82,9 +105,9 @@ function App() {
 
   useEffect(() => {
     if (loggedIn && currentUser) {
-      loadMedications(currentUser.id);
+      loadMedications();
     }
-  }, [loggedIn, currentUser]);
+  }, [loggedIn, currentUser, loadMedications]);
 
   useEffect(() => {
     if (message) {
@@ -264,7 +287,7 @@ function App() {
       setMessage(data.message || `${med.name} saved.`);
       setNewInteractionReport(data.interactionCheck || null);
 
-      await loadMedications(currentUser.id);
+      await loadMedications();
     } catch (err) {
       console.error(err);
       setError(err.message || "Something went wrong while saving.");
@@ -291,7 +314,7 @@ function App() {
       }
 
       setMessage(data.message || "Medication deleted successfully.");
-      await loadMedications(currentUser.id);
+      await loadMedications();
     } catch (err) {
       console.error(err);
       setError(err.message || "Could not delete medication.");
@@ -403,33 +426,13 @@ function App() {
   };
 
 
-  const loadSchedule = async (medicationId) => {
-  try {
-    const res = await fetch(
-      `${API_BASE}/api/medications/${medicationId}/schedule`,
-      { credentials: "include" }
-    );
 
-    const data = await res.json();
 
-    if (!res.ok) {
-      throw new Error(data.error || "Could not load schedule.");
-    }
-
-    setSchedules((prev) => ({
-      ...prev,
-      [medicationId]: data.schedule || []
-    }));
-  } catch (err) {
-    console.error(err);
-  }
-};
-
-  const handleKeyDown = (event) => {
-    if (event.key === "Enter") {
-      handleSearch();
-    }
-  };
+  // const handleKeyDown = (event) => {
+  //   if (event.key === "Enter") {
+  //     handleSearch();
+  //   }
+  // };
 
 if (!authChecked) {
   return (

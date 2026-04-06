@@ -31,10 +31,14 @@ function App() {
   const [schedules, setSchedules] = useState({});
   const [scheduleForm, setScheduleForm] = useState({});
 
+  const API_BASE = process.env.REACT_APP_API_BASE || "http://localhost:5000";
+
+  const COMPARE_API_BASE = process.env.REACT_APP_COMPARE_API_BASE || "http://localhost:5001";
+
   const loadMedications = async () => {
     try {
       const res = await fetch(
-        `http://localhost:5000/api/medications`, {
+         `${API_BASE}/api/medications`, {
             credentials: "include"
           });
       const data = await res.json();
@@ -57,7 +61,7 @@ function App() {
   useEffect(() => {
     const checkSession = async () => {
       try {
-        const response = await fetch("http://localhost:5000/api/me", {
+        const response = await fetch(`${API_BASE}/api/me`, {
           credentials: "include"
         });
         const data = await response.json();
@@ -113,7 +117,7 @@ function App() {
     setMessage("");
 
     try {
-      const response = await fetch("http://localhost:5000/api/login", {
+      const response = await fetch(`${API_BASE}/api/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -142,7 +146,7 @@ function App() {
     setMessage("");
 
     try {
-      const response = await fetch("http://localhost:5000/api/register", {
+      const response = await fetch(`${API_BASE}/api/register`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -168,7 +172,7 @@ function App() {
   };
 
   const handleLogout = async () => {
-    await fetch("http://localhost:5000/api/logout", {
+    await fetch(`${API_BASE}/api/logout`, {
       method: "POST",
       credentials: "include",
     })
@@ -201,7 +205,7 @@ function App() {
 
     try {
       const res = await fetch(
-        `http://localhost:5000/api/medications/search?q=${encodeURIComponent(query)}`
+        `${API_BASE}/api/medications/search?q=${encodeURIComponent(query)}`
       );
       const data = await res.json();
 
@@ -242,7 +246,7 @@ function App() {
     };
 
     try {
-      const res = await fetch("http://localhost:5000/api/medications", {
+      const res = await fetch(`${API_BASE}/api/medications`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -273,7 +277,7 @@ function App() {
 
     try {
       const res = await fetch(
-        `http://localhost:5000/api/medications/${id}`,
+        `${API_BASE}/api/medications/${id}`,
         {
           method: "DELETE",
           credentials: "include"
@@ -306,7 +310,7 @@ function App() {
 
     try {
       const res = await fetch(
-        `http://localhost:5001/api/compare-drugs?drugA=${encodeURIComponent(
+        `${COMPARE_API_BASE}/api/compare-drugs?drugA=${encodeURIComponent(
           drugA
         )}&drugB=${encodeURIComponent(drugB)}`
       );
@@ -344,7 +348,7 @@ function App() {
 
     try {
       const res = await fetch(
-        `http://localhost:5000/api/medications/${medicationId}/schedule`,
+        `${API_BASE}/api/medications/${medicationId}/schedule`,
         {
           method: "POST",
           headers: {
@@ -377,7 +381,7 @@ function App() {
   const handleDeleteSchedule = async (medicationId, scheduleId) => {
     try {
       const res = await fetch(
-        `http://localhost:5000/api/medication-schedules/${scheduleId}`,
+        `${API_BASE}/api/medication-schedules/${scheduleId}`,
         {
           method: "DELETE",
           credentials: "include"
@@ -402,7 +406,7 @@ function App() {
   const loadSchedule = async (medicationId) => {
   try {
     const res = await fetch(
-      `http://localhost:5000/api/medications/${medicationId}/schedule`,
+      `${API_BASE}/api/medications/${medicationId}/schedule`,
       { credentials: "include" }
     );
 

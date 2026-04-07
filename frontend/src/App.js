@@ -2,8 +2,8 @@ import React, { useEffect, useState, useCallback } from "react";
 import "bootstrap/dist/css/bootstrap.min.css";
 import "./App.css";
 
-const API_BASE = process.env.REACT_APP_API_BASE || "http://localhost:5000";
-const COMPARE_API_BASE = process.env.REACT_APP_COMPARE_API_BASE || "http://localhost:5001";
+const API_BASE = "";
+const COMPARE_API_BASE = "";
 
 
 function App() {

@@ -9,9 +9,17 @@ import secrets
 
 app = Flask(__name__)
 
+IS_LOCAL = os.environ.get("FLASK_ENV") != "production"
 
-FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "https://medication-safety-assistant-production.up.railway.app")
-COMPARE_API_BASE = os.environ.get("COMPARE_API_BASE", "https://compare-api.up.railway.app/api")
+FRONTEND_ORIGIN = os.environ.get(
+    "FRONTEND_ORIGIN",
+    "http://localhost:3000" if IS_LOCAL else "https://medication-safety-assistant-production.up.railway.app"
+)
+COMPARE_API_BASE = os.environ.get(
+    "COMPARE_API_BASE",
+    "http://localhost:5001/api" if IS_LOCAL else "https://compare-api.up.railway.app/api"
+)
+
 
 CORS(app, supports_credentials=True, origins=[FRONTEND_ORIGIN])
 
@@ -19,8 +27,8 @@ CORS(app, supports_credentials=True, origins=[FRONTEND_ORIGIN])
 
 app.config["SECRET_KEY"] = "a93078317010017de2d299609e21c07972acb982531748c7da06c42635009e99"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "None"
-app.config["SESSION_COOKIE_SECURE"] = True  # True when using HTTPS
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax" if IS_LOCAL else "None"
+app.config["SESSION_COOKIE_SECURE"] = False if IS_LOCAL else True # True when using HTTPS
 
 
 RXNAV_BASE = "https://rxnav.nlm.nih.gov/REST"
@@ -60,6 +68,8 @@ def init_db():
         tty TEXT,
         synonym TEXT,
         score TEXT,
+        dosage TEXT,
+        notes TEXT,
         FOREIGN KEY (user_id) REFERENCES users(id),
         UNIQUE(user_id, rxcui)
     )
@@ -77,6 +87,16 @@ def init_db():
         )
     """)
 
+    medication_columns = {
+        row["name"] for row in cursor.execute("PRAGMA table_info(medications)").fetchall()
+    }
+
+    if "dosage" not in medication_columns:
+        cursor.execute("ALTER TABLE medications ADD COLUMN dosage TEXT")
+
+    if "notes" not in medication_columns:
+        cursor.execute("ALTER TABLE medications ADD COLUMN notes TEXT")
+
 
     
 
@@ -93,7 +113,7 @@ def check_new_medication_against_saved(new_med_name, new_med_id, user_id):
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT id, rxcui, name, tty, synonym, score
+        SELECT id, rxcui, name, tty, synonym, score, dosage, notes
         FROM medications
         WHERE id != ? AND user_id = ?
         ORDER BY id DESC
@@ -328,6 +348,8 @@ def add_medication():
     tty = data.get("tty")
     synonym = data.get("synonym")
     score = data.get("score")
+    dosage = data.get("dosage")
+    notes = data.get("notes")
 
     print("PARSED VALUES:", user_id, rxcui, name)
 
@@ -339,9 +361,9 @@ def add_medication():
 
     try:
         cursor.execute("""
-                       INSERT INTO medications (user_id, rxcui, name, tty, synonym, score)
-                       VALUES (?, ?, ?, ?, ?, ?)
-                       """, (user_id, rxcui, name, tty, synonym, score))
+                       INSERT INTO medications (user_id, rxcui, name, tty, synonym, score, dosage, notes)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                       """, (user_id, rxcui, name, tty, synonym, score, dosage, notes))
 
         conn.commit()
         new_id = cursor.lastrowid
@@ -357,7 +379,9 @@ def add_medication():
                 "name": name,
                 "tty": tty,
                 "synonym": synonym,
-                "score": score
+                "score": score,
+                "dosage": dosage,
+                "notes": notes
             },
             "interactionCheck": interaction_check
         }), 201
@@ -380,7 +404,7 @@ def get_medications():
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT id, user_id, rxcui, name, tty, synonym, score
+        SELECT id, user_id, rxcui, name, tty, synonym, score, dosage, notes
         FROM medications
         WHERE user_id = ?
         ORDER BY id DESC
@@ -392,6 +416,50 @@ def get_medications():
     medications = [dict(row) for row in rows]
 
     return jsonify({"medications": medications})
+
+@app.route("/api/medications/<int:medication_id>", methods=["PATCH"])
+def update_medication(medication_id):
+    user_id = get_logged_in_user()
+    if not user_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json() or {}
+    dosage = (data.get("dosage") or "").strip() or None
+    notes = (data.get("notes") or "").strip() or None
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    medication = cursor.execute("""
+        SELECT id, user_id, rxcui, name, tty, synonym, score, dosage, notes
+        FROM medications
+        WHERE id = ? AND user_id = ?
+    """, (medication_id, user_id)).fetchone()
+
+    if medication is None:
+        conn.close()
+        return jsonify({"error": "Medication not found"}), 404
+
+    cursor.execute("""
+        UPDATE medications
+        SET dosage = ?, notes = ?
+        WHERE id = ? AND user_id = ?
+    """, (dosage, notes, medication_id, user_id))
+
+    conn.commit()
+
+    updated_medication = cursor.execute("""
+        SELECT id, user_id, rxcui, name, tty, synonym, score, dosage, notes
+        FROM medications
+        WHERE id = ? AND user_id = ?
+    """, (medication_id, user_id)).fetchone()
+
+    conn.close()
+
+    return jsonify({
+        "message": "Medication details updated.",
+        "medication": dict(updated_medication)
+    })
     
 @app.route("/api/medications/<int:medication_id>", methods=["DELETE"])
 def delete_medication(medication_id):

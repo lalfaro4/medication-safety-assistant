@@ -19,3 +19,6 @@ backend/node_modules/
 # OS files
 .DS_Store
 Thumbs.db
+
+backend/compare_api/node_modules/
+backend/medications.db

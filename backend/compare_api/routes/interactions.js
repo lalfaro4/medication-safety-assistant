@@ -42,9 +42,21 @@ function textMentionsAnyName(textArray, namesToCheck) {
   });
 }
 
+function getDisplayName(queryName, normalizedLabel) {
+  return (
+    queryName?.trim() ||
+    normalizedLabel?.drug?.brandName ||
+    normalizedLabel?.drug?.genericName ||
+    "This medication"
+  );
+}
+
 function compareNormalizedLabels(drugAQuery, labelA, drugBQuery, labelB) {
   const namesA = collectNames(labelA, drugAQuery);
   const namesB = collectNames(labelB, drugBQuery);
+
+  const displayNameA = getDisplayName(drugAQuery, labelA);
+  const displayNameB = getDisplayName(drugBQuery, labelB);
 
   const sectionsA = labelA?.sections || {};
   const sectionsB = labelB?.sections || {};
@@ -98,27 +110,45 @@ function compareNormalizedLabels(drugAQuery, labelA, drugBQuery, labelB) {
 
   const summary = [];
 
-  if (aMentionsBInInteractions || bMentionsAInInteractions) {
+  if (aMentionsBInInteractions) {
     summary.push(
-      "Possible interaction found in the drug_interactions section of one or both labels."
+      `${displayNameB} appears in the drug interactions section of ${displayNameA}'s label.`
     );
   }
 
-  if (aMentionsBInWarnings || bMentionsAInWarnings) {
+  if (bMentionsAInInteractions) {
     summary.push(
-      "One drug name appears in the warnings section of the other drug's label."
+      `${displayNameA} appears in the drug interactions section of ${displayNameB}'s label.`
     );
   }
 
-  if (aMentionsBInContraindications || bMentionsAInContraindications) {
+  if (aMentionsBInWarnings) {
     summary.push(
-      "One drug name appears in the contraindications section of the other drug's label."
+      `${displayNameB} appears in the warnings section of ${displayNameA}'s label.`
+    );
+  }
+
+  if (bMentionsAInWarnings) {
+    summary.push(
+      `${displayNameA} appears in the warnings section of ${displayNameB}'s label.`
+    );
+  }
+
+  if (aMentionsBInContraindications) {
+    summary.push(
+      `${displayNameB} appears in the contraindications section of ${displayNameA}'s label.`
+    );
+  }
+
+  if (bMentionsAInContraindications) {
+    summary.push(
+      `${displayNameA} appears in the contraindications section of ${displayNameB}'s label.`
     );
   }
 
   if (summary.length === 0) {
     summary.push(
-      "No direct mention of either drug was found in the other drug's interaction-related label sections."
+      "No direct interaction-related mentions were found in the fetched label sections."
     );
   }
 

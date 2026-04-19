@@ -6,6 +6,8 @@ import sqlite3
 from pathlib import Path
 import os
 import secrets
+from dotenv import load_dotenv
+load_dotenv()
 
 app = Flask(__name__)
 
@@ -19,6 +21,11 @@ COMPARE_API_BASE = os.environ.get(
     "COMPARE_API_BASE",
     "http://localhost:5001/api" if IS_LOCAL else "https://compare-api.up.railway.app/api"
 )
+
+google_places_api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
+
+print("GOOGLE KEY PREFIX:", (os.environ.get("GOOGLE_PLACES_API_KEY") or "")[:10])
+print("GOOGLE KEY PRESENT:", bool(os.environ.get("GOOGLE_PLACES_API_KEY")))
 
 
 CORS(app, supports_credentials=True, origins=[FRONTEND_ORIGIN])
@@ -86,6 +93,23 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL UNIQUE,
+            name TEXT,
+            age INTEGER,
+            allergies TEXT,
+            conditions TEXT,
+            notes TEXT,
+            favorite_pharmacy_name TEXT,
+            favorite_pharmacy_address TEXT,
+            favorite_pharmacy_phone TEXT,
+            favorite_pharmacy_place_id TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+);""")
+
 
     medication_columns = {
         row["name"] for row in cursor.execute("PRAGMA table_info(medications)").fetchall()
@@ -592,6 +616,193 @@ def delete_medication_schedule(schedule_id):
     conn.close()
 
     return jsonify({"message": "Schedule entry deleted successfully"})
+
+
+@app.route("/api/profile", methods=["GET"])
+def get_profile():
+    user_id = get_logged_in_user()
+    if not user_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    profile = cursor.execute("""
+        SELECT id, user_id, name, age, allergies, conditions, notes,
+               favorite_pharmacy_name, favorite_pharmacy_address,
+               favorite_pharmacy_phone, favorite_pharmacy_place_id
+        FROM user_profiles
+        WHERE user_id = ?
+    """, (user_id,)).fetchone()
+
+    conn.close()
+
+    if not profile:
+        return jsonify({
+            "profile": {
+                "name": "",
+                "age": "",
+                "allergies": "",
+                "conditions": "",
+                "notes": "",
+                "favorite_pharmacy_name": "",
+                "favorite_pharmacy_address": "",
+                "favorite_pharmacy_phone": "",
+                "favorite_pharmacy_place_id": ""
+            }
+        }), 200
+
+    return jsonify({"profile": dict(profile)}), 200
+
+
+@app.route("/api/profile", methods=["PUT"])
+def save_profile():
+    user_id = get_logged_in_user()
+    if not user_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json() or {}
+
+    name = data.get("name", "").strip()
+    age = data.get("age")
+    allergies = data.get("allergies", "").strip()
+    conditions = data.get("conditions", "").strip()
+    notes = data.get("notes", "").strip()
+    favorite_pharmacy_name = data.get("favorite_pharmacy_name", "").strip()
+    favorite_pharmacy_address = data.get("favorite_pharmacy_address", "").strip()
+    favorite_pharmacy_phone = data.get("favorite_pharmacy_phone", "").strip()
+    favorite_pharmacy_place_id = data.get("favorite_pharmacy_place_id", "").strip()
+
+    if age == "":
+        age = None
+
+    if age is not None:
+        try:
+            age = int(age)
+        except ValueError:
+            return jsonify({"error": "Age must be a number."}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    existing_profile = cursor.execute("""
+        SELECT id FROM user_profiles WHERE user_id = ?
+    """, (user_id,)).fetchone()
+
+    if existing_profile:
+        cursor.execute("""
+            UPDATE user_profiles
+            SET name = ?,
+                age = ?,
+                allergies = ?,
+                conditions = ?,
+                notes = ?,
+                favorite_pharmacy_name = ?,
+                favorite_pharmacy_address = ?,
+                favorite_pharmacy_phone = ?,
+                favorite_pharmacy_place_id = ?
+            WHERE user_id = ?
+        """, (
+            name,
+            age,
+            allergies,
+            conditions,
+            notes,
+            favorite_pharmacy_name,
+            favorite_pharmacy_address,
+            favorite_pharmacy_phone,
+            favorite_pharmacy_place_id,
+            user_id
+        ))
+    else:
+        cursor.execute("""
+            INSERT INTO user_profiles (
+                user_id, name, age, allergies, conditions, notes,
+                favorite_pharmacy_name, favorite_pharmacy_address,
+                favorite_pharmacy_phone, favorite_pharmacy_place_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            user_id,
+            name,
+            age,
+            allergies,
+            conditions,
+            notes,
+            favorite_pharmacy_name,
+            favorite_pharmacy_address,
+            favorite_pharmacy_phone,
+            favorite_pharmacy_place_id
+        ))
+
+    conn.commit()
+
+    profile = cursor.execute("""
+        SELECT id, user_id, name, age, allergies, conditions, notes,
+               favorite_pharmacy_name, favorite_pharmacy_address,
+               favorite_pharmacy_phone, favorite_pharmacy_place_id
+        FROM user_profiles
+        WHERE user_id = ?
+    """, (user_id,)).fetchone()
+
+    conn.close()
+
+    return jsonify({
+        "message": "Profile saved successfully.",
+        "profile": dict(profile)
+    }), 200
+
+@app.route("/api/pharmacies/search", methods=["GET"])
+def search_pharmacies():
+    user_id = get_logged_in_user()
+    if not user_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    query = request.args.get("query", "").strip()
+    if not query:
+        return jsonify({"error": "Missing query parameter."}), 400
+
+    api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
+    if not api_key:
+        return jsonify({"error": "Missing Google Places API key."}), 500
+
+    url = "https://places.googleapis.com/v1/places:searchText"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber"
+    }
+    payload = {
+        "textQuery": f"pharmacy {query}",
+        "maxResultCount": 8
+    }
+
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=15)
+        data = response.json()
+
+        if not response.ok:
+            return jsonify({
+                "error": "Pharmacy search failed.",
+                "details": data
+            }), 502
+
+        results = []
+        for place in data.get("places", []):
+            results.append({
+                "place_id": place.get("id", ""),
+                "name": place.get("displayName", {}).get("text", ""),
+                "address": place.get("formattedAddress", ""),
+                "phone": place.get("nationalPhoneNumber", "")
+            })
+
+        return jsonify({"results": results}), 200
+
+    except requests.RequestException as e:
+        return jsonify({
+            "error": "Could not reach Google Places API.",
+            "details": str(e)
+        }), 502
 
 
 init_db()

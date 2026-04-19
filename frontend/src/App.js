@@ -183,6 +183,65 @@ function App() {
   const latestSearchRequestRef = useRef(0);
   const [expandedCompareLabels, setExpandedCompareLabels] = useState({});
 
+  const [profile, setProfile] = useState({
+    name: "",
+    age: "",
+    allergies: "",
+    conditions: "",
+    notes: "",
+    favorite_pharmacy_name: "",
+    favorite_pharmacy_address: "",
+    favorite_pharmacy_phone: "",
+    favorite_pharmacy_place_id: ""
+  });
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileMessage, setProfileMessage] = useState("");
+  const [currentView, setCurrentView] = useState("dashboard");
+
+  const [pharmacyQuery, setPharmacyQuery] = useState("");
+  const [pharmacyResults, setPharmacyResults] = useState([]);
+  const [pharmacyLoading, setPharmacyLoading] = useState(false);
+
+
+  const loadProfile = useCallback(async () => {
+    try {
+      setError("");
+      setProfileMessage("");
+
+      const res = await fetch(`${API_BASE}/api/profile`, {
+        credentials: "include"
+      });
+
+      const contentType = res.headers.get("content-type") || "";
+      let data;
+
+      if (contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(`Expected JSON, got: ${text.slice(0, 200)}`);
+      }
+
+      if (!res.ok) {
+        throw new Error(data.error || "Could not load profile.");
+      }
+
+      setProfile({
+        name: data.profile?.name || "",
+        age: data.profile?.age ?? "",
+        allergies: data.profile?.allergies || "",
+        conditions: data.profile?.conditions || "",
+        notes: data.profile?.notes || "",
+        favorite_pharmacy_name: data.profile?.favorite_pharmacy_name || "",
+        favorite_pharmacy_address: data.profile?.favorite_pharmacy_address || "",
+        favorite_pharmacy_phone: data.profile?.favorite_pharmacy_phone || "",
+        favorite_pharmacy_place_id: data.profile?.favorite_pharmacy_place_id || ""
+      });
+    } catch (err) {
+      console.error("Could not load profile:", err);
+      setError(err.message || "Could not load profile.");
+    }
+  }, []);
 
     const loadSchedule = useCallback(async (medicationId) => {
     try {
@@ -294,6 +353,12 @@ function App() {
       setExpandedFullLabels({});
     }
   }, [newInteractionReport]);
+
+  useEffect(() => {
+  if (loggedIn && currentUser && currentView === "profile") {
+    loadProfile();
+  }
+}, [loggedIn, currentUser, currentView, loadProfile]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -704,14 +769,90 @@ function App() {
     }
   };
 
+  const handleSaveProfile = async () => {
+  setProfileLoading(true);
+  setError("");
+  setProfileMessage("");
+
+  try {
+    const res = await fetch(`${API_BASE}/api/profile`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      credentials: "include",
+      body: JSON.stringify(profile)
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || "Could not save profile.");
+    }
+
+    setProfile(data.profile);
+    setProfileMessage(data.message || "Profile saved successfully.");
+  } catch (err) {
+    console.error(err);
+    setError(err.message || "Could not save profile.");
+  } finally {
+    setProfileLoading(false);
+  }
+};
+
+  const handlePharmacySearch = async () => {
+    if (!pharmacyQuery.trim()) {
+      setError("Please enter a pharmacy name, city, or ZIP code.");
+      setPharmacyResults([]);
+      return;
+    }
+
+    setError("");
+    setPharmacyLoading(true);
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/pharmacies/search?query=${encodeURIComponent(pharmacyQuery)}`,
+        { credentials: "include" }
+      );
+
+      const contentType = res.headers.get("content-type") || "";
+      let data;
+
+      if (contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(`Expected JSON, got: ${text.slice(0, 200)}`);
+      }
+
+      if (!res.ok) {
+        throw new Error(data.error || "Could not search pharmacies.");
+      }
+
+      setPharmacyResults(data.results || []);
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "Could not search pharmacies.");
+      setPharmacyResults([]);
+    } finally {
+      setPharmacyLoading(false);
+    }
+  };
+
+  const handleSelectFavoritePharmacy = (pharmacy) => {
+    setProfile((prev) => ({
+      ...prev,
+      favorite_pharmacy_name: pharmacy.name || "",
+      favorite_pharmacy_address: pharmacy.address || "",
+      favorite_pharmacy_phone: pharmacy.phone || "",
+      favorite_pharmacy_place_id: pharmacy.place_id || ""
+    }));
+
+    setProfileMessage("Favorite pharmacy selected. Click Save Profile to keep it.");
+  };
 
 
-
-  // const handleKeyDown = (event) => {
-  //   if (event.key === "Enter") {
-  //     handleSearch();
-  //   }
-  // };
 
 if (!authChecked) {
   return (
@@ -824,9 +965,25 @@ if (!loggedIn) {
               )}
             </div>
 
-            <button className="btn btn-outline-secondary btn-sm" onClick={handleLogout}>
-              Log Out
-            </button>
+            <div className="d-flex gap-2">
+              <button
+                className={`btn btn-sm ${currentView === "dashboard" ? "btn-primary" : "btn-outline-primary"}`}
+                onClick={() => setCurrentView("dashboard")}
+              >
+                Dashboard
+              </button>
+
+              <button
+                className={`btn btn-sm ${currentView === "profile" ? "btn-primary" : "btn-outline-primary"}`}
+                onClick={() => setCurrentView("profile")}
+              >
+                Profile
+              </button>
+
+              <button className="btn btn-outline-secondary btn-sm" onClick={handleLogout}>
+                Log Out
+              </button>
+            </div>
           </div>
 
           {error && <div className="alert alert-danger mt-4">{error}</div>}
@@ -995,184 +1152,338 @@ if (!loggedIn) {
             </div>
           )}
 
-          <h2 className="mt-4">Saved Medications</h2>
+          {currentView === "profile" ? (
+            <>
+              <h2 className="mt-4">Profile</h2>
 
-          <div className="med-grid">
-            {medications.length === 0 ? (
-              <p className="text-muted">No medications saved yet.</p>
-            ) : (
-              medications.map((med) => {
-                const detailsForm = medicationDetailsForm[med.id] || { dosage: "", notes: "" };
-                const medicationSchedule = schedules[med.id] || [];
-                const hasSavedPersonalDetails = Boolean(
-                  (med.dosage && med.dosage.trim()) || (med.notes && med.notes.trim())
-                );
-                const hasSavedSchedule = medicationSchedule.length > 0;
-                const isDetailsExpanded = Boolean(expandedMedicationDetails[med.id]);
+              {profileMessage && (
+                <div className="alert alert-success mt-3">
+                  {profileMessage}
+                </div>
+              )}
 
-                return (
-                  <div key={med.id} className="med-card">
-                    <div>
-                      <h3 className="med-name">{med.name}</h3>
-                      <div className="med-meta">RxCUI: {med.rxcui}</div>
-                      {med.synonym && <div className="med-meta">Synonym: {med.synonym}</div>}
-                      {med.tty && <div className="med-meta">Type: {med.tty}</div>}
+              <div className="search-card mt-3">
+                <div className="mb-3">
+                  <label className="form-label">Name</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={profile.name}
+                    onChange={(e) =>
+                      setProfile((prev) => ({ ...prev, name: e.target.value }))
+                    }
+                    placeholder="Enter your name"
+                  />
+                </div>
 
-                      <div className="mt-3 medication-details-block">
-                        <button
-                          type="button"
-                          className="btn btn-sm med-detail-toggle-btn"
-                          onClick={() => toggleMedicationDetails(med.id)}
-                          aria-expanded={isDetailsExpanded}
+                <div className="mb-3">
+                  <label className="form-label">Age</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={profile.age}
+                    onChange={(e) =>
+                      setProfile((prev) => ({ ...prev, age: e.target.value }))
+                    }
+                    placeholder="Enter your age"
+                  />
+                </div>
+
+                <div className="mb-3">
+                  <label className="form-label">Allergies</label>
+                  <textarea
+                    className="form-control"
+                    rows="2"
+                    value={profile.allergies}
+                    onChange={(e) =>
+                      setProfile((prev) => ({ ...prev, allergies: e.target.value }))
+                    }
+                    placeholder="Example: penicillin, peanuts"
+                  />
+                </div>
+
+                <div className="mb-3">
+                  <label className="form-label">Conditions</label>
+                  <textarea
+                    className="form-control"
+                    rows="2"
+                    value={profile.conditions}
+                    onChange={(e) =>
+                      setProfile((prev) => ({ ...prev, conditions: e.target.value }))
+                    }
+                    placeholder="Example: asthma, diabetes"
+                  />
+                </div>
+
+                <div className="mb-3">
+                  <label className="form-label">Notes</label>
+                  <textarea
+                    className="form-control"
+                    rows="3"
+                    value={profile.notes}
+                    onChange={(e) =>
+                      setProfile((prev) => ({ ...prev, notes: e.target.value }))
+                    }
+                    placeholder="Add any personal notes"
+                  />
+                </div>
+
+                <div className="mt-4">
+                  <h5>Favorite Pharmacy</h5>
+                  {profile.favorite_pharmacy_name ? (
+                    <div className="border rounded p-3 bg-light">
+                      <div><strong>{profile.favorite_pharmacy_name}</strong></div>
+                      {profile.favorite_pharmacy_address && (
+                        <div>{profile.favorite_pharmacy_address}</div>
+                      )}
+                      {profile.favorite_pharmacy_phone && (
+                        <div>{profile.favorite_pharmacy_phone}</div>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-muted">No favorite pharmacy selected yet.</p>
+                  )}
+                </div>
+
+                <div className="mt-4">
+                  <h5>Search for a Pharmacy</h5>
+
+                  <div className="d-flex gap-2 flex-wrap">
+                    <input
+                      type="text"
+                      className="form-control"
+                      style={{ maxWidth: "420px" }}
+                      value={pharmacyQuery}
+                      onChange={(e) => setPharmacyQuery(e.target.value)}
+                      placeholder="Search by pharmacy name, city, or ZIP"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handlePharmacySearch();
+                      }}
+                    />
+
+                    <button
+                      className="btn btn-outline-primary"
+                      onClick={handlePharmacySearch}
+                      disabled={pharmacyLoading}
+                    >
+                      {pharmacyLoading ? "Searching..." : "Search"}
+                    </button>
+                  </div>
+
+                  {pharmacyResults.length > 0 && (
+                    <div className="mt-3">
+                      {pharmacyResults.map((pharmacy) => (
+                        <div
+                          key={pharmacy.place_id}
+                          className="border rounded p-3 mb-2 d-flex justify-content-between align-items-start"
                         >
-                          {isDetailsExpanded
-                            ? "Hide personal details"
-                            : hasSavedPersonalDetails || hasSavedSchedule
-                              ? "Edit personal details"
-                              : "Add personal details"}
-                        </button>
-
-                        {(hasSavedPersonalDetails || hasSavedSchedule) && !isDetailsExpanded && (
-                          <div className="med-detail-preview">
-                            {med.dosage && <div><strong>Dosage:</strong> {med.dosage}</div>}
-                            {med.notes && <div><strong>Notes:</strong> {med.notes}</div>}
-                            {hasSavedSchedule && (
-                              <div>
-                                <strong>Schedule:</strong> {medicationSchedule
-                                  .map((entry) => `${entry.day_of_week} - ${entry.time_of_day}`)
-                                  .join(", ")}
-                              </div>
-                            )}
+                          <div>
+                            <div><strong>{pharmacy.name}</strong></div>
+                            {pharmacy.address && <div>{pharmacy.address}</div>}
+                            {pharmacy.phone && <div>{pharmacy.phone}</div>}
                           </div>
-                        )}
 
-                        {isDetailsExpanded && (
-                          <div className="med-detail-panel">
-                            <label className="med-detail-label" htmlFor={`dosage-${med.id}`}>
-                              Dosage
-                            </label>
-                            <input
-                              id={`dosage-${med.id}`}
-                              type="text"
-                              className="form-control med-detail-input"
-                              placeholder="Ex: 10 mg once daily"
-                              value={detailsForm.dosage}
-                              onChange={(e) =>
-                                handleMedicationDetailsChange(med.id, "dosage", e.target.value)
-                              }
-                            />
+                          <button
+                            className="btn btn-sm btn-outline-success"
+                            onClick={() => handleSelectFavoritePharmacy(pharmacy)}
+                          >
+                            Set Favorite
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
-                            <label className="med-detail-label mt-3" htmlFor={`notes-${med.id}`}>
-                              Notes
-                            </label>
-                            <textarea
-                              id={`notes-${med.id}`}
-                              className="form-control med-notes-input"
-                              placeholder="Add reminders, side effects, or anything else to track"
-                              value={detailsForm.notes}
-                              onChange={(e) =>
-                                handleMedicationDetailsChange(med.id, "notes", e.target.value)
-                              }
-                            />
+                <button
+                  className="btn btn-main mt-3"
+                  onClick={handleSaveProfile}
+                  disabled={profileLoading}
+                >
+                  {profileLoading ? "Saving..." : "Save Profile"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <h2 className="mt-4">Saved Medications</h2>
 
+              <div className="med-grid">
+                {medications.length === 0 ? (
+                  <p className="text-muted">No medications saved yet.</p>
+                ) : (
+                  medications.map((med) => {
+                    const detailsForm = medicationDetailsForm[med.id] || { dosage: "", notes: "" };
+                    const medicationSchedule = schedules[med.id] || [];
+                    const hasSavedPersonalDetails = Boolean(
+                      (med.dosage && med.dosage.trim()) || (med.notes && med.notes.trim())
+                    );
+                    const hasSavedSchedule = medicationSchedule.length > 0;
+                    const isDetailsExpanded = Boolean(expandedMedicationDetails[med.id]);
+
+                    return (
+                      <div key={med.id} className="med-card">
+                        <div>
+                          <h3 className="med-name">{med.name}</h3>
+                          <div className="med-meta">RxCUI: {med.rxcui}</div>
+                          {med.synonym && <div className="med-meta">Synonym: {med.synonym}</div>}
+                          {med.tty && <div className="med-meta">Type: {med.tty}</div>}
+
+                          <div className="mt-3 medication-details-block">
                             <button
-                              className="btn btn-sm btn-outline-secondary med-detail-save-btn mt-3"
-                              onClick={() => handleSaveMedicationDetails(med.id)}
-                              disabled={Boolean(savingMedicationDetails[med.id])}
+                              type="button"
+                              className="btn btn-sm med-detail-toggle-btn"
+                              onClick={() => toggleMedicationDetails(med.id)}
+                              aria-expanded={isDetailsExpanded}
                             >
-                              {savingMedicationDetails[med.id] ? "Saving..." : "Save details"}
+                              {isDetailsExpanded
+                                ? "Hide personal details"
+                                : hasSavedPersonalDetails || hasSavedSchedule
+                                  ? "Edit personal details"
+                                  : "Add personal details"}
                             </button>
 
-                            <div className="med-schedule-section">
-                              <h5 className="mb-2">Schedule</h5>
+                            {(hasSavedPersonalDetails || hasSavedSchedule) && !isDetailsExpanded && (
+                              <div className="med-detail-preview">
+                                {med.dosage && <div><strong>Dosage:</strong> {med.dosage}</div>}
+                                {med.notes && <div><strong>Notes:</strong> {med.notes}</div>}
+                                {hasSavedSchedule && (
+                                  <div>
+                                    <strong>Schedule:</strong> {medicationSchedule
+                                      .map((entry) => `${entry.day_of_week} - ${entry.time_of_day}`)
+                                      .join(", ")}
+                                  </div>
+                                )}
+                              </div>
+                            )}
 
-                              {medicationSchedule.length > 0 ? (
-                                <ul className="list-unstyled mb-3">
-                                  {medicationSchedule.map((entry) => (
-                                    <li
-                                      key={entry.id}
-                                      className="d-flex justify-content-between align-items-center mb-2"
-                                    >
-                                      <span>
-                                        {entry.day_of_week} — {entry.time_of_day}
-                                      </span>
-                                      <button
-                                        className="btn btn-sm btn-outline-danger"
-                                        onClick={() => handleDeleteSchedule(med.id, entry.id)}
-                                      >
-                                        Remove
-                                      </button>
-                                    </li>
-                                  ))}
-                                </ul>
-                              ) : (
-                                <p className="text-muted mb-3">No schedule added yet.</p>
-                              )}
-
-                              <div className="d-flex gap-2 flex-wrap">
-                                <select
-                                  className="form-select schedule-select"
-                                  style={{ maxWidth: "160px" }}
-                                  value={scheduleForm[med.id]?.day_of_week || ""}
-                                  onChange={(e) =>
-                                    setScheduleForm((prev) => ({
-                                      ...prev,
-                                      [med.id]: {
-                                        ...prev[med.id],
-                                        day_of_week: e.target.value
-                                      }
-                                    }))
-                                  }
-                                >
-                                  <option value="">Day</option>
-                                  <option value="Monday">Monday</option>
-                                  <option value="Tuesday">Tuesday</option>
-                                  <option value="Wednesday">Wednesday</option>
-                                  <option value="Thursday">Thursday</option>
-                                  <option value="Friday">Friday</option>
-                                  <option value="Saturday">Saturday</option>
-                                  <option value="Sunday">Sunday</option>
-                                </select>
-
+                            {isDetailsExpanded && (
+                              <div className="med-detail-panel">
+                                <label className="med-detail-label" htmlFor={`dosage-${med.id}`}>
+                                  Dosage
+                                </label>
                                 <input
-                                  type="time"
-                                  className="form-control schedule-time-input"
-                                  value={scheduleForm[med.id]?.time_of_day || ""}
+                                  id={`dosage-${med.id}`}
+                                  type="text"
+                                  className="form-control med-detail-input"
+                                  placeholder="Ex: 10 mg once daily"
+                                  value={detailsForm.dosage}
                                   onChange={(e) =>
-                                    setScheduleForm((prev) => ({
-                                      ...prev,
-                                      [med.id]: {
-                                        ...prev[med.id],
-                                        time_of_day: e.target.value
-                                      }
-                                    }))
+                                    handleMedicationDetailsChange(med.id, "dosage", e.target.value)
+                                  }
+                                />
+
+                                <label className="med-detail-label mt-3" htmlFor={`notes-${med.id}`}>
+                                  Notes
+                                </label>
+                                <textarea
+                                  id={`notes-${med.id}`}
+                                  className="form-control med-notes-input"
+                                  placeholder="Add reminders, side effects, or anything else to track"
+                                  value={detailsForm.notes}
+                                  onChange={(e) =>
+                                    handleMedicationDetailsChange(med.id, "notes", e.target.value)
                                   }
                                 />
 
                                 <button
-                                  className="btn btn-sm btn-outline-success"
-                                  onClick={() => handleAddSchedule(med.id)}
+                                  className="btn btn-sm btn-outline-secondary med-detail-save-btn mt-3"
+                                  onClick={() => handleSaveMedicationDetails(med.id)}
+                                  disabled={Boolean(savingMedicationDetails[med.id])}
                                 >
-                                  Add Schedule
+                                  {savingMedicationDetails[med.id] ? "Saving..." : "Save details"}
                                 </button>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
 
-                    <button
-                      className="btn btn-delete"
-                      onClick={() => handleDeleteMedication(med.id)}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                );
-              })
-            )}
-          </div>
+                                <div className="med-schedule-section">
+                                  <h5 className="mb-2">Schedule</h5>
+
+                                  {medicationSchedule.length > 0 ? (
+                                    <ul className="list-unstyled mb-3">
+                                      {medicationSchedule.map((entry) => (
+                                        <li
+                                          key={entry.id}
+                                          className="d-flex justify-content-between align-items-center mb-2"
+                                        >
+                                          <span>
+                                            {entry.day_of_week} — {entry.time_of_day}
+                                          </span>
+                                          <button
+                                            className="btn btn-sm btn-outline-danger"
+                                            onClick={() => handleDeleteSchedule(med.id, entry.id)}
+                                          >
+                                            Remove
+                                          </button>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <p className="text-muted mb-3">No schedule added yet.</p>
+                                  )}
+
+                                  <div className="d-flex gap-2 flex-wrap">
+                                    <select
+                                      className="form-select schedule-select"
+                                      style={{ maxWidth: "160px" }}
+                                      value={scheduleForm[med.id]?.day_of_week || ""}
+                                      onChange={(e) =>
+                                        setScheduleForm((prev) => ({
+                                          ...prev,
+                                          [med.id]: {
+                                            ...prev[med.id],
+                                            day_of_week: e.target.value
+                                          }
+                                        }))
+                                      }
+                                    >
+                                      <option value="">Day</option>
+                                      <option value="Monday">Monday</option>
+                                      <option value="Tuesday">Tuesday</option>
+                                      <option value="Wednesday">Wednesday</option>
+                                      <option value="Thursday">Thursday</option>
+                                      <option value="Friday">Friday</option>
+                                      <option value="Saturday">Saturday</option>
+                                      <option value="Sunday">Sunday</option>
+                                    </select>
+
+                                    <input
+                                      type="time"
+                                      className="form-control schedule-time-input"
+                                      value={scheduleForm[med.id]?.time_of_day || ""}
+                                      onChange={(e) =>
+                                        setScheduleForm((prev) => ({
+                                          ...prev,
+                                          [med.id]: {
+                                            ...prev[med.id],
+                                            time_of_day: e.target.value
+                                          }
+                                        }))
+                                      }
+                                    />
+
+                                    <button
+                                      className="btn btn-sm btn-outline-success"
+                                      onClick={() => handleAddSchedule(med.id)}
+                                    >
+                                      Add Schedule
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          className="btn btn-delete"
+                          onClick={() => handleDeleteMedication(med.id)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
 
           <h2 className="mt-5">Search Medications</h2>
 
@@ -1293,8 +1604,11 @@ if (!loggedIn) {
                     </div>
                   );
                 })}
+
               </div>
             </div>
+          )}
+            </>
           )}
         </div>
       </div>

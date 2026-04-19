@@ -11,12 +11,15 @@ load_dotenv()
 
 app = Flask(__name__)
 
-IS_LOCAL = os.environ.get("FLASK_ENV") != "production"
+ENV = os.environ.get("APP_ENV", "production")
+
+IS_LOCAL = ENV == "local"
 
 FRONTEND_ORIGIN = os.environ.get(
     "FRONTEND_ORIGIN",
     "http://localhost:3000" if IS_LOCAL else "https://medication-safety-assistant-production.up.railway.app"
 )
+
 COMPARE_API_BASE = os.environ.get(
     "COMPARE_API_BASE",
     "http://localhost:5001/api" if IS_LOCAL else "https://compare-api.up.railway.app/api"

@@ -324,8 +324,9 @@ function App() {
   useEffect(() => {
     if (loggedIn && currentUser) {
       loadMedications();
+      loadProfile();
     }
-  }, [loggedIn, currentUser, loadMedications]);
+  }, [loggedIn, currentUser, loadMedications, loadProfile]);
 
   useEffect(() => {
     if (message) {
@@ -852,6 +853,18 @@ function App() {
     setProfileMessage("Favorite pharmacy selected. Click Save Profile to keep it.");
   };
 
+  const handleClearFavoritePharmacy = () => {
+    setProfile((prev) => ({
+      ...prev,
+      favorite_pharmacy_name: "",
+      favorite_pharmacy_address: "",
+      favorite_pharmacy_phone: "",
+      favorite_pharmacy_place_id: ""
+    }));
+
+    setProfileMessage("Favorite pharmacy cleared. Click Save Profile to keep this change.");
+  };
+
 
 
 if (!authChecked) {
@@ -1239,6 +1252,12 @@ if (!loggedIn) {
                       {profile.favorite_pharmacy_phone && (
                         <div>{profile.favorite_pharmacy_phone}</div>
                       )}
+                      <button
+                        className="btn btn-sm btn-outline-danger mt-3"
+                        onClick={handleClearFavoritePharmacy}
+                      >
+                        Remove Favorite Pharmacy
+                      </button>
                     </div>
                   ) : (
                     <p className="text-muted">No favorite pharmacy selected yet.</p>
@@ -1306,6 +1325,28 @@ if (!loggedIn) {
             </>
           ) : (
             <>
+              <div className="mt-4">
+                <h2>Quick Profile Summary</h2>
+
+                <div className="search-card mt-3">
+                  <div className="mb-2">
+                    <strong>Name:</strong> {profile.name || "Not set"}
+                  </div>
+                  <div className="mb-2">
+                    <strong>Favorite Pharmacy:</strong> {profile.favorite_pharmacy_name || "Not set"}
+                  </div>
+                  {profile.favorite_pharmacy_address && (
+                    <div className="text-muted">{profile.favorite_pharmacy_address}</div>
+                  )}
+
+                  <button
+                    className="btn btn-outline-primary btn-sm mt-3"
+                    onClick={() => setCurrentView("profile")}
+                  >
+                    View Profile
+                  </button>
+                </div>
+              </div>
               <h2 className="mt-4">Saved Medications</h2>
 
               <div className="med-grid">

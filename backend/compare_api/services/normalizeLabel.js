@@ -26,7 +26,15 @@ function normalizeLabel(label) {
       contraindications: arr(label.contraindications),
       warnings: arr(label.warnings),
       warningsAndCautions: arr(label.warnings_and_cautions),
-      boxedWarning: arr(label.boxed_warning)
+      boxedWarning: arr(label.boxed_warning),
+      adverseReactions: arr(label.adverse_reactions),
+      patientInformation: arr(label.information_for_patients),
+      patientCounselingInformation: arr(label.patient_medication_information),
+      doNotUse: arr(label.do_not_use),
+      askDoctor: arr(label.ask_doctor),
+      askDoctorOrPharmacist: arr(label.ask_doctor_or_pharmacist),
+      stopUse: arr(label.stop_use),
+      whenUsing: arr(label.when_using)
     }
   };
 }

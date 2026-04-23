@@ -51,6 +51,76 @@ function getDisplayName(queryName, normalizedLabel) {
   );
 }
 
+function cleanEntry(text) {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function summarizeEntries(entries, limit = 3) {
+  const seen = new Set();
+  const summary = [];
+
+  for (const entry of entries || []) {
+    const cleaned = cleanEntry(entry);
+
+    if (!cleaned) continue;
+
+    const isTruncated = cleaned.length > 220;
+    const excerpt = isTruncated
+      ? `${cleaned.slice(0, 217).trimEnd()}...`
+      : cleaned;
+
+    const key = excerpt.toLowerCase();
+
+    if (seen.has(key)) continue;
+    seen.add(key);
+    summary.push({
+      excerpt,
+      fullText: cleaned,
+      isTruncated
+    });
+
+    if (summary.length >= limit) break;
+  }
+
+  return summary;
+}
+
+function buildDrugSummary(drugQuery, normalizedLabel) {
+  const sections = normalizedLabel?.sections || {};
+  const warnings = [
+    ...summarizeEntries(sections.boxedWarning, 1),
+    ...summarizeEntries(sections.contraindications, 2),
+    ...summarizeEntries(sections.warningsAndCautions, 2),
+    ...summarizeEntries(sections.warnings, 2)
+  ];
+
+  const instructions = summarizeEntries([
+    ...(sections.whenUsing || []),
+    ...(sections.patientInformation || []),
+    ...(sections.patientCounselingInformation || []),
+    ...(sections.doNotUse || []),
+    ...(sections.askDoctor || []),
+    ...(sections.askDoctorOrPharmacist || []),
+    ...(sections.stopUse || [])
+  ], 4);
+
+  const sideEffects = summarizeEntries(sections.adverseReactions, 3);
+
+  return {
+    drugQuery,
+    displayName: getDisplayName(drugQuery, normalizedLabel),
+    matchedLabel: normalizedLabel?.drug || {},
+    meta: normalizedLabel?.meta || {},
+    boxedWarning: summarizeEntries(sections.boxedWarning, 1),
+    importantWarnings: warnings,
+    importantInstructions: instructions,
+    commonSideEffects: sideEffects,
+    hasAnyInfo: warnings.length > 0 || instructions.length > 0 || sideEffects.length > 0
+  };
+}
+
 function compareNormalizedLabels(drugAQuery, labelA, drugBQuery, labelB) {
   const namesA = collectNames(labelA, drugAQuery);
   const namesB = collectNames(labelB, drugBQuery);
@@ -194,6 +264,37 @@ router.get("/label-interactions", async (req, res) => {
     console.error("Interaction route error:", error);
     return res.status(500).json({
       error: "Server error while fetching label interactions."
+    });
+  }
+});
+
+router.get("/drug-summary", async (req, res) => {
+  try {
+    const drug = req.query.drug;
+
+    if (!drug || !drug.trim()) {
+      return res.status(400).json({
+        error: "Missing drug query parameter."
+      });
+    }
+
+    const rawLabel = await fetchDrugLabel(drug.trim());
+
+    if (!rawLabel) {
+      return res.status(404).json({
+        error: `No label found for drug: ${drug}`
+      });
+    }
+
+    const normalized = normalizeLabel(rawLabel);
+
+    return res.json({
+      summary: buildDrugSummary(drug.trim(), normalized)
+    });
+  } catch (error) {
+    console.error("Drug summary route error:", error);
+    return res.status(500).json({
+      error: "Server error while fetching drug summary."
     });
   }
 });

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import "bootstrap/dist/css/bootstrap.min.css";
 import "./App.css";
+import dosewiseLogo from "./dosewise-logo.svg";
 
 const API_BASE = (process.env.REACT_APP_API_BASE || "http://localhost:5000").trim().replace(/\/$/, "");
 const COMPARE_API_BASE = (process.env.REACT_APP_COMPARE_API_BASE || "http://localhost:5001/api")
@@ -147,6 +148,14 @@ function buildFullCompareLabel(detail) {
     .join("\n\n");
 }
 
+function getDrugInfoEntryKey(sectionName, idx) {
+  return `${sectionName}-${idx}`;
+}
+
+function getDisplayProfileName(profileName, currentUser) {
+  return profileName?.trim() || currentUser?.name || "there";
+}
+
 function App() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
@@ -180,6 +189,10 @@ function App() {
   const [medicationDetailsForm, setMedicationDetailsForm] = useState({});
   const [savingMedicationDetails, setSavingMedicationDetails] = useState({});
   const [expandedMedicationDetails, setExpandedMedicationDetails] = useState({});
+  const [drugInfoByMedication, setDrugInfoByMedication] = useState({});
+  const [loadingDrugInfo, setLoadingDrugInfo] = useState({});
+  const [expandedDrugInfo, setExpandedDrugInfo] = useState({});
+  const [expandedDrugInfoEntries, setExpandedDrugInfoEntries] = useState({});
   const latestSearchRequestRef = useRef(0);
   const [expandedCompareLabels, setExpandedCompareLabels] = useState({});
 
@@ -197,6 +210,7 @@ function App() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileMessage, setProfileMessage] = useState("");
   const [currentView, setCurrentView] = useState("dashboard");
+  const [showWelcomeSplash, setShowWelcomeSplash] = useState(false);
 
   const [pharmacyQuery, setPharmacyQuery] = useState("");
   const [pharmacyResults, setPharmacyResults] = useState([]);
@@ -361,6 +375,21 @@ function App() {
   }
 }, [loggedIn, currentUser, currentView, loadProfile]);
 
+  useEffect(() => {
+    if (!loggedIn || !currentUser) {
+      setShowWelcomeSplash(false);
+      return;
+    }
+
+    setShowWelcomeSplash(true);
+
+    const splashTimer = setTimeout(() => {
+      setShowWelcomeSplash(false);
+    }, 3300);
+
+    return () => clearTimeout(splashTimer);
+  }, [loggedIn, currentUser]);
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setError("");
@@ -443,6 +472,11 @@ function App() {
     setExpandedInteractionDetails({});
     setExpandedFullLabels({});
     setExpandedCompareLabels({});
+    setDrugInfoByMedication({});
+    setLoadingDrugInfo({});
+    setExpandedDrugInfo({});
+    setExpandedDrugInfoEntries({});
+    setShowWelcomeSplash(false);
   };
 
   const handleSearch = async () => {
@@ -635,6 +669,66 @@ function App() {
     setExpandedMedicationDetails((prev) => ({
       ...prev,
       [medicationId]: !prev[medicationId]
+    }));
+  };
+
+  const loadDrugInfo = useCallback(async (medicationId, medicationName) => {
+    setLoadingDrugInfo((prev) => ({
+      ...prev,
+      [medicationId]: true
+    }));
+
+    try {
+      const summaryUrl = new URL(`${COMPARE_API_BASE}/drug-summary`);
+      summaryUrl.searchParams.set("drug", medicationName);
+
+      const res = await fetch(summaryUrl.toString());
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Could not load drug information.");
+      }
+
+      setDrugInfoByMedication((prev) => ({
+        ...prev,
+        [medicationId]: data.summary || null
+      }));
+    } catch (err) {
+      console.error(err);
+      setDrugInfoByMedication((prev) => ({
+        ...prev,
+        [medicationId]: {
+          error: err.message || "Could not load drug information."
+        }
+      }));
+    } finally {
+      setLoadingDrugInfo((prev) => ({
+        ...prev,
+        [medicationId]: false
+      }));
+    }
+  }, []);
+
+  const toggleDrugInfo = (medicationId, medicationName) => {
+    const willExpand = !expandedDrugInfo[medicationId];
+
+    setExpandedDrugInfo((prev) => ({
+      ...prev,
+      [medicationId]: willExpand
+    }));
+
+    if (willExpand && !drugInfoByMedication[medicationId] && !loadingDrugInfo[medicationId]) {
+      loadDrugInfo(medicationId, medicationName);
+    }
+  };
+
+  const toggleDrugInfoEntry = (medicationId, entryKey) => {
+    setExpandedDrugInfoEntries((prev) => ({
+      ...prev,
+      [medicationId]: {
+        ...(prev[medicationId] || {}),
+        [entryKey]: !(prev[medicationId] || {})[entryKey]
+      }
     }));
   };
 
@@ -872,10 +966,11 @@ if (!authChecked) {
     <div className="app-shell">
       <div className="container py-5">
         <div
-          className="search-card mx-auto text-center"
+          className="search-card login-card mx-auto text-center"
           style={{ maxWidth: "450px" }}
         >
-          <h1 className="mb-3">Medication Safety Assistant</h1>
+          <img src={dosewiseLogo} alt="DoseWise logo" className="login-brand-logo mb-3" />
+          <h1 className="mb-3">DoseWise</h1>
           <p className="text-muted mb-4">Loading...</p>
 
           <div className="spinner-border text-primary"
@@ -894,8 +989,9 @@ if (!loggedIn) {
     return (
       <div className="app-shell">
         <div className="container py-5">
-          <div className="search-card mx-auto" style={{ maxWidth: "450px" }}>
-            <h1 className="mb-3">Medication Safety Assistant</h1>
+          <div className="search-card login-card mx-auto" style={{ maxWidth: "450px" }}>
+            <img src={dosewiseLogo} alt="DoseWise logo" className="login-brand-logo mb-3" />
+            <h1 className="mb-3">DoseWise</h1>
             <p className="text-muted mb-4">
               {isRegistering ? "Create an account." : "Log in to continue."}
             </p>
@@ -964,35 +1060,32 @@ if (!loggedIn) {
 
   return (
     <div className="app-shell">
+      {showWelcomeSplash && (
+        <div className="welcome-splash" aria-live="polite">
+        <div className="welcome-splash-card">
+          <img src={dosewiseLogo} alt="DoseWise logo" className="welcome-splash-logo" />
+          <p className="welcome-splash-eyebrow">Welcome back</p>
+          <h2 className="welcome-splash-title">
+            Welcome back, {getDisplayProfileName(profile.name, currentUser)}.
+          </h2>
+          <p className="welcome-splash-copy">DoseWise-Your medications all in one place!</p>
+        </div>
+      </div>
+      )}
       <div className="container">
         <div className="dashboard-card mx-auto">
           <div className="hero-section d-flex justify-content-between align-items-start">
-            <div>
-              <p className="eyebrow">Medication Safety Assistant</p>
-              <h1 className="app-title">Your medications, all in one place 💊</h1>
+            <div className="hero-main">
+              <div className="brand-title-row">
+                <img src={dosewiseLogo} alt="DoseWise logo" className="brand-logo" />
+                <h1 className="app-title app-title-compact app-title-single-line mb-0">Medication Dashboard</h1>
+              </div>
               <p className="hero-copy">
-                Track, search, and compare medications with interaction awareness.
+                Track medications, review label highlights, and stay on top of safety details.
               </p>
-              {currentUser && (
-                <p className="text-muted mb-0">Logged in as {currentUser.name}</p>
-              )}
             </div>
 
-            <div className="d-flex gap-2">
-              <button
-                className={`btn btn-sm ${currentView === "dashboard" ? "btn-primary" : "btn-outline-primary"}`}
-                onClick={() => setCurrentView("dashboard")}
-              >
-                Dashboard
-              </button>
-
-              <button
-                className={`btn btn-sm ${currentView === "profile" ? "btn-primary" : "btn-outline-primary"}`}
-                onClick={() => setCurrentView("profile")}
-              >
-                Profile
-              </button>
-
+            <div className="hero-actions d-flex gap-2">
               <button className="btn btn-outline-secondary btn-sm" onClick={handleLogout}>
                 Log Out
               </button>
@@ -1167,6 +1260,13 @@ if (!loggedIn) {
 
           {currentView === "profile" ? (
             <>
+              <button
+                className="btn btn-outline-primary btn-sm mt-4"
+                onClick={() => setCurrentView("dashboard")}
+              >
+                Back to Dashboard
+              </button>
+
               <h2 className="mt-4">Profile</h2>
 
               {profileMessage && (
@@ -1325,29 +1425,31 @@ if (!loggedIn) {
             </>
           ) : (
             <>
-              <div className="mt-4">
-                <h2>Quick Profile Summary</h2>
-
-                <div className="search-card mt-3">
-                  <div className="mb-2">
-                    <strong>Name:</strong> {profile.name || "Not set"}
+              <div className="dashboard-welcome-block">
+                <div className="welcome-summary-card welcome-summary-strip">
+                  <div className="welcome-summary-copy">
+                    <p className="welcome-summary-eyebrow">Welcome</p>
+                    <h2 className="welcome-summary-title">
+                      {getDisplayProfileName(profile.name, currentUser)}
+                    </h2>
+                    <p className="welcome-summary-text">
+                      {profile.favorite_pharmacy_name
+                        ? `Favorite pharmacy set to ${profile.favorite_pharmacy_name}.`
+                        : "Add a favorite pharmacy and profile details for a more personalized experience."}
+                    </p>
+                    {profile.favorite_pharmacy_address && (
+                      <div className="text-muted">{profile.favorite_pharmacy_address}</div>
+                    )}
                   </div>
-                  <div className="mb-2">
-                    <strong>Favorite Pharmacy:</strong> {profile.favorite_pharmacy_name || "Not set"}
-                  </div>
-                  {profile.favorite_pharmacy_address && (
-                    <div className="text-muted">{profile.favorite_pharmacy_address}</div>
-                  )}
-
                   <button
-                    className="btn btn-outline-primary btn-sm mt-3"
+                    className="btn btn-outline-primary btn-sm"
                     onClick={() => setCurrentView("profile")}
                   >
                     View Profile
                   </button>
                 </div>
               </div>
-              <h2 className="mt-4">Saved Medications</h2>
+              <h2 className="mt-3">Saved Medications</h2>
 
               <div className="med-grid">
                 {medications.length === 0 ? (
@@ -1356,6 +1458,9 @@ if (!loggedIn) {
                   medications.map((med) => {
                     const detailsForm = medicationDetailsForm[med.id] || { dosage: "", notes: "" };
                     const medicationSchedule = schedules[med.id] || [];
+                    const drugInfo = drugInfoByMedication[med.id];
+                    const expandedDrugEntries = expandedDrugInfoEntries[med.id] || {};
+                    const isDrugInfoExpanded = Boolean(expandedDrugInfo[med.id]);
                     const hasSavedPersonalDetails = Boolean(
                       (med.dosage && med.dosage.trim()) || (med.notes && med.notes.trim())
                     );
@@ -1512,6 +1617,147 @@ if (!loggedIn) {
                               </div>
                             )}
                           </div>
+
+                          <div className="mt-3 medication-details-block">
+                            <button
+                              type="button"
+                              className="btn btn-sm med-detail-toggle-btn"
+                              onClick={() => toggleDrugInfo(med.id, med.name)}
+                              aria-expanded={isDrugInfoExpanded}
+                            >
+                              {isDrugInfoExpanded ? "Hide drug info" : "Show drug info"}
+                            </button>
+
+                            {isDrugInfoExpanded && (
+                              <div className="med-detail-panel drug-info-panel">
+                                {loadingDrugInfo[med.id] ? (
+                                  <p className="text-muted mb-0">Loading label highlights...</p>
+                                ) : drugInfo?.error ? (
+                                  <p className="drug-info-error mb-0">{drugInfo.error}</p>
+                                ) : drugInfo ? (
+                                  <>
+                                    <div className="drug-info-source">
+                                      Label highlights for {drugInfo.displayName || med.name}
+                                    </div>
+
+                                    {drugInfo.boxedWarning?.length > 0 && (
+                                      <div className="drug-info-section">
+                                        <h5>Boxed Warning</h5>
+                                        <ul className="drug-info-list">
+                                          {drugInfo.boxedWarning.map((item, idx) => {
+                                            const entryKey = getDrugInfoEntryKey("boxed", idx);
+                                            const isExpanded = Boolean(expandedDrugEntries[entryKey]);
+
+                                            return (
+                                              <li key={`boxed-${med.id}-${idx}`}>
+                                                <span>{isExpanded ? item.fullText : item.excerpt}</span>
+                                                {item.isTruncated && (
+                                                  <button
+                                                    type="button"
+                                                    className="btn btn-link drug-info-expand-btn"
+                                                    onClick={() => toggleDrugInfoEntry(med.id, entryKey)}
+                                                  >
+                                                    {isExpanded ? "Show less" : "Show full label"}
+                                                  </button>
+                                                )}
+                                              </li>
+                                            );
+                                          })}
+                                        </ul>
+                                      </div>
+                                    )}
+
+                                    {drugInfo.importantWarnings?.length > 0 && (
+                                      <div className="drug-info-section">
+                                        <h5>Important Warnings</h5>
+                                        <ul className="drug-info-list">
+                                          {drugInfo.importantWarnings.map((item, idx) => {
+                                            const entryKey = getDrugInfoEntryKey("warning", idx);
+                                            const isExpanded = Boolean(expandedDrugEntries[entryKey]);
+
+                                            return (
+                                              <li key={`warning-${med.id}-${idx}`}>
+                                                <span>{isExpanded ? item.fullText : item.excerpt}</span>
+                                                {item.isTruncated && (
+                                                  <button
+                                                    type="button"
+                                                    className="btn btn-link drug-info-expand-btn"
+                                                    onClick={() => toggleDrugInfoEntry(med.id, entryKey)}
+                                                  >
+                                                    {isExpanded ? "Show less" : "Show full label"}
+                                                  </button>
+                                                )}
+                                              </li>
+                                            );
+                                          })}
+                                        </ul>
+                                      </div>
+                                    )}
+
+                                    {drugInfo.importantInstructions?.length > 0 && (
+                                      <div className="drug-info-section">
+                                        <h5>Important Instructions</h5>
+                                        <ul className="drug-info-list">
+                                          {drugInfo.importantInstructions.map((item, idx) => {
+                                            const entryKey = getDrugInfoEntryKey("instruction", idx);
+                                            const isExpanded = Boolean(expandedDrugEntries[entryKey]);
+
+                                            return (
+                                              <li key={`instruction-${med.id}-${idx}`}>
+                                                <span>{isExpanded ? item.fullText : item.excerpt}</span>
+                                                {item.isTruncated && (
+                                                  <button
+                                                    type="button"
+                                                    className="btn btn-link drug-info-expand-btn"
+                                                    onClick={() => toggleDrugInfoEntry(med.id, entryKey)}
+                                                  >
+                                                    {isExpanded ? "Show less" : "Show full label"}
+                                                  </button>
+                                                )}
+                                              </li>
+                                            );
+                                          })}
+                                        </ul>
+                                      </div>
+                                    )}
+
+                                    {drugInfo.commonSideEffects?.length > 0 && (
+                                      <div className="drug-info-section">
+                                        <h5>Possible Side Effects</h5>
+                                        <ul className="drug-info-list">
+                                          {drugInfo.commonSideEffects.map((item, idx) => {
+                                            const entryKey = getDrugInfoEntryKey("effect", idx);
+                                            const isExpanded = Boolean(expandedDrugEntries[entryKey]);
+
+                                            return (
+                                              <li key={`effect-${med.id}-${idx}`}>
+                                                <span>{isExpanded ? item.fullText : item.excerpt}</span>
+                                                {item.isTruncated && (
+                                                  <button
+                                                    type="button"
+                                                    className="btn btn-link drug-info-expand-btn"
+                                                    onClick={() => toggleDrugInfoEntry(med.id, entryKey)}
+                                                  >
+                                                    {isExpanded ? "Show less" : "Show full label"}
+                                                  </button>
+                                                )}
+                                              </li>
+                                            );
+                                          })}
+                                        </ul>
+                                      </div>
+                                    )}
+
+                                    {!drugInfo.hasAnyInfo && (
+                                      <p className="text-muted mb-0">
+                                        No label highlights were found for this medication.
+                                      </p>
+                                    )}
+                                  </>
+                                ) : null}
+                              </div>
+                            )}
+                          </div>
                         </div>
 
                         <button
@@ -1560,28 +1806,34 @@ if (!loggedIn) {
             ))}
           </div>
 
-          <h2 className="mt-5">Compare Medications</h2>
+          <div className="compare-section mt-5">
+            <div className="compare-section-header">
+              <h2>Compare Medications</h2>
+              <p className="compare-section-copy">
+                Run a side-by-side label comparison without changing your saved medication list.
+              </p>
+            </div>
 
-          <div className="compare-grid">
-            <input
-              className="form-control"
-              placeholder="Drug A"
-              value={drugA}
-              onChange={(e) => setDrugA(e.target.value)}
-            />
-            <input
-              className="form-control"
-              placeholder="Drug B"
-              value={drugB}
-              onChange={(e) => setDrugB(e.target.value)}
-            />
-            <button className="btn btn-main" onClick={handleCompare} disabled={compareLoading}>
-              {compareLoading ? "Comparing..." : "Compare"}
-            </button>
-          </div>
+            <div className="compare-grid">
+              <input
+                className="form-control"
+                placeholder="Drug A"
+                value={drugA}
+                onChange={(e) => setDrugA(e.target.value)}
+              />
+              <input
+                className="form-control"
+                placeholder="Drug B"
+                value={drugB}
+                onChange={(e) => setDrugB(e.target.value)}
+              />
+              <button className="btn btn-main" onClick={handleCompare} disabled={compareLoading}>
+                {compareLoading ? "Comparing..." : "Compare"}
+              </button>
+            </div>
 
-          {comparisonResult && (
-            <div className="comparison-panel mt-4">
+            {comparisonResult && (
+              <div className="comparison-panel mt-4">
               <h4 className="mb-3">
                 Review recommended:{" "}
                 {comparisonResult.comparison?.possibleInteraction ? "Yes" : "No"}
@@ -1607,48 +1859,48 @@ if (!loggedIn) {
                 </p>
               </div>
 
-              <div className="compare-label-actions mt-3">
-                {[
-                  {
-                    key: "drugA",
-                    label: comparisonResult.comparison?.drugA || "Drug A",
-                    detail: comparisonResult.drugADetails
-                  },
-                  {
-                    key: "drugB",
-                    label: comparisonResult.comparison?.drugB || "Drug B",
-                    detail: comparisonResult.drugBDetails
-                  }
-                ].map(({ key, label, detail }) => {
-                  const fullLabel = buildFullCompareLabel(detail);
+                <div className="compare-label-actions mt-3">
+                  {[
+                    {
+                      key: "drugA",
+                      label: comparisonResult.comparison?.drugA || "Drug A",
+                      detail: comparisonResult.drugADetails
+                    },
+                    {
+                      key: "drugB",
+                      label: comparisonResult.comparison?.drugB || "Drug B",
+                      detail: comparisonResult.drugBDetails
+                    }
+                  ].map(({ key, label, detail }) => {
+                    const fullLabel = buildFullCompareLabel(detail);
 
-                  if (!fullLabel) return null;
+                    if (!fullLabel) return null;
 
-                  return (
-                    <div key={key} className="compare-label-block">
-                      <button
-                        type="button"
-                        className="btn btn-link interaction-full-label-toggle"
-                        onClick={() => toggleCompareLabel(key)}
-                        aria-expanded={Boolean(expandedCompareLabels[key])}
-                      >
-                        {expandedCompareLabels[key]
-                          ? `Hide full warning label for ${label}`
-                          : `Show full warning label for ${label}`}
-                      </button>
+                    return (
+                      <div key={key} className="compare-label-block">
+                        <button
+                          type="button"
+                          className="btn btn-link interaction-full-label-toggle"
+                          onClick={() => toggleCompareLabel(key)}
+                          aria-expanded={Boolean(expandedCompareLabels[key])}
+                        >
+                          {expandedCompareLabels[key]
+                            ? `Hide full warning label for ${label}`
+                            : `Show full warning label for ${label}`}
+                        </button>
 
-                      {expandedCompareLabels[key] && (
-                        <div className="comparison-full-label-text">
-                          {fullLabel}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-
+                        {expandedCompareLabels[key] && (
+                          <div className="comparison-full-label-text">
+                            {fullLabel}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
             </>
           )}
         </div>

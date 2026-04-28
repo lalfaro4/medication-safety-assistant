@@ -420,6 +420,185 @@ def add_medication():
 
     finally:
         conn.close()
+        
+def build_fhir_medication_request(med):
+    return {
+        "resourceType": "MedicationRequest",
+        "id": str(med["id"]),
+        "meta": {
+            "profile": ["http://hl7.org/fhir/StructureDefinition/MedicationRequest"]
+        },
+        "status": "active",
+        "intent": "order",
+        "medicationCodeableConcept": {
+            "coding": [
+                {
+                    "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+                    "code": med["rxcui"],
+                    "display": med["name"]
+                }
+            ],
+            "text": med["name"]
+        },
+        "subject": {
+            "reference": f"Patient/{med['user_id']}"
+        },
+        "dosageInstruction": [
+            {
+                "text": med["dosage"] or "No dosage specified"
+            }
+        ],
+        "note": [
+            {
+                "text": med["notes"] or ""
+            }
+        ]
+    }
+
+def build_fhir_medication_bundle(medications):
+    return {
+        "resourceType": "Bundle",
+        "type": "collection",
+        "entry": [
+            {
+                "fullUrl": f"MedicationRequest/{med['id']}",
+                "resource": build_fhir_medication_request(med)
+            }
+            for med in medications
+        ]
+    }
+    
+def build_fhir_patient(user, profile=None):
+    profile = profile or {}
+
+    return {
+        "resourceType": "Patient",
+        "id": str(user["id"]),
+        "meta": {
+            "profile": ["http://hl7.org/fhir/StructureDefinition/Patient"]
+        },
+        "active": True,
+        "name": [
+            {
+                "use": "official",
+                "text": profile.get("name") or user["name"]
+            }
+        ],
+        "telecom": [
+            {
+                "system": "email",
+                "value": user["email"]
+            }
+        ]
+    }
+
+
+def build_fhir_allergy_intolerance(allergy_text, user_id):
+    allergies = [
+        item.strip()
+        for item in (allergy_text or "").split(",")
+        if item.strip()
+    ]
+
+    return [
+        {
+            "resourceType": "AllergyIntolerance",
+            "id": f"{user_id}-allergy-{idx + 1}",
+            "meta": {
+                "profile": ["http://hl7.org/fhir/StructureDefinition/AllergyIntolerance"]
+            },
+            "clinicalStatus": {
+                "coding": [
+                    {
+                        "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+                        "code": "active",
+                        "display": "Active"
+                    }
+                ]
+            },
+            "code": {
+                "text": allergy
+            },
+            "patient": {
+                "reference": f"Patient/{user_id}"
+            }
+        }
+        for idx, allergy in enumerate(allergies)
+    ]
+    
+@app.route("/fhir/Patient/<int:patient_id>", methods=["GET"])
+def get_fhir_patient(patient_id):
+    user_id = get_logged_in_user()
+    if not user_id or user_id != patient_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    conn = get_db_connection()
+
+    user = conn.execute(
+        "SELECT id, name, email FROM users WHERE id = ?",
+        (user_id,)
+    ).fetchone()
+
+    profile = conn.execute(
+        "SELECT name, age, allergies, conditions, notes FROM user_profiles WHERE user_id = ?",
+        (user_id,)
+    ).fetchone()
+
+    conn.close()
+
+    if not user:
+        return jsonify({"error": "Patient not found"}), 404
+
+    return jsonify(build_fhir_patient(dict(user), dict(profile) if profile else {}))
+
+
+@app.route("/fhir/AllergyIntolerance", methods=["GET"])
+def get_fhir_allergies():
+    user_id = get_logged_in_user()
+    if not user_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    conn = get_db_connection()
+
+    profile = conn.execute(
+        "SELECT allergies FROM user_profiles WHERE user_id = ?",
+        (user_id,)
+    ).fetchone()
+
+    conn.close()
+
+    allergies = build_fhir_allergy_intolerance(
+        profile["allergies"] if profile else "",
+        user_id
+    )
+
+    return jsonify({
+        "resourceType": "Bundle",
+        "type": "collection",
+        "entry": [
+            {"resource": allergy}
+            for allergy in allergies
+        ]
+    })
+
+@app.route("/fhir/MedicationRequest", methods=["GET"])
+def get_fhir_medication_requests():
+    user_id = get_logged_in_user()
+    if not user_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    conn = get_db_connection()
+    rows = conn.execute("""
+        SELECT id, user_id, rxcui, name, tty, synonym, score, dosage, notes
+        FROM medications
+        WHERE user_id = ?
+        ORDER BY id DESC
+    """, (user_id,)).fetchall()
+    conn.close()
+
+    medications = [dict(row) for row in rows]
+
+    return jsonify(build_fhir_medication_bundle(medications))
 
 @app.route("/api/medications", methods=["GET"])
 def get_medications():
@@ -442,7 +621,10 @@ def get_medications():
 
     medications = [dict(row) for row in rows]
 
-    return jsonify({"medications": medications})
+    return jsonify({
+        "medications": medications,
+        "fhirBundle": build_fhir_medication_bundle(medications)
+    })
 
 @app.route("/api/medications/<int:medication_id>", methods=["PATCH"])
 def update_medication(medication_id):

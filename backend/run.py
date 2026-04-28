@@ -302,7 +302,7 @@ def search_medications():
         approx_url = f"{RXNAV_BASE}/approximateTerm.json"
         approx_response = requests.get(
             approx_url,
-            params={"term": query, "maxEntries": 10},
+            params={"term": query, "maxEntries": 20},
             timeout=10,
         )
         approx_response.raise_for_status()
@@ -335,13 +335,13 @@ def search_medications():
                 "score": score,
             })
             
-            # Remove results with no name and repeated rxcui values
-            cleaned_results = []
-            seen_rxcuis = set()
+        # Remove results with no name and repeated rxcui values
+        cleaned_results = []
+        seen_rxcuis = set()
 
-            for item in results:
-                rxcui = item.get("rxcui")
-                name = item.get("name")
+        for item in results:
+            rxcui = item.get("rxcui")
+            name = item.get("name")
 
             if not rxcui or not name:
                 continue
@@ -352,7 +352,7 @@ def search_medications():
             seen_rxcuis.add(rxcui)
             cleaned_results.append(item)
 
-        return jsonify({"query": query, "results": results})
+        return jsonify({"query": query, "results": cleaned_results})
 
     except requests.RequestException as e:
         return jsonify({

@@ -8,6 +8,7 @@ import os
 import secrets
 from dotenv import load_dotenv
 load_dotenv()
+from known_allergies import KNOWN_ALLERGIES
 
 app = Flask(__name__)
 
@@ -493,38 +494,35 @@ def build_fhir_patient(user, profile=None):
     }
 
 
-def build_fhir_allergy_intolerance(allergy_text, user_id):
-    allergies = [
-        item.strip()
-        for item in (allergy_text or "").split(",")
-        if item.strip()
-    ]
+def build_fhir_allergy_intolerance(user_id, allergy):
 
-    return [
-        {
-            "resourceType": "AllergyIntolerance",
-            "id": f"{user_id}-allergy-{idx + 1}",
-            "meta": {
-                "profile": ["http://hl7.org/fhir/StructureDefinition/AllergyIntolerance"]
-            },
-            "clinicalStatus": {
-                "coding": [
-                    {
-                        "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
-                        "code": "active",
-                        "display": "Active"
-                    }
-                ]
-            },
-            "code": {
-                "text": allergy
-            },
-            "patient": {
-                "reference": f"Patient/{user_id}"
-            }
-        }
-        for idx, allergy in enumerate(allergies)
-    ]
+    return {
+        "resourceType": "AllergyIntolerance",
+        "id": f"{user_id}-allergy",
+        "meta": {
+            "profile": ["http://hl7.org/fhir/StructureDefinition/AllergyIntolerance"]
+        },
+        "clinicalStatus": {
+            "coding": [
+                {
+                    "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+                    "code": "active",
+                    "display": "Active"
+                }
+            ]
+        },
+        "patient": {
+            "reference": f"Patient/{user_id}"
+        },
+        "code": {
+            "text": allergy["fhir_text"]
+        },
+        "clinicalStatus": {
+            "text": "active"
+        },
+    }
+
+
     
 @app.route("/fhir/Patient/<int:patient_id>", methods=["GET"])
 def get_fhir_patient(patient_id):
@@ -551,6 +549,16 @@ def get_fhir_patient(patient_id):
 
     return jsonify(build_fhir_patient(dict(user), dict(profile) if profile else {}))
 
+@app.route("/api/allergies", methods=["GET"])
+def get_known_allergies():
+    return jsonify({"allergies": KNOWN_ALLERGIES}), 200
+
+
+
+
+def get_selected_allergy_objects(allergy_text):
+    selected_names = [a.strip() for a in allergy_text.split(",") if a.strip()]
+    return [item for item in KNOWN_ALLERGIES if item["display"] in selected_names]
 
 @app.route("/fhir/AllergyIntolerance", methods=["GET"])
 def get_fhir_allergies():
@@ -567,19 +575,21 @@ def get_fhir_allergies():
 
     conn.close()
 
-    allergies = build_fhir_allergy_intolerance(
-        profile["allergies"] if profile else "",
-        user_id
-    )
+    allergy_text = profile["allergies"] if profile and profile["allergies"] else ""
+    selected_allergies = get_selected_allergy_objects(allergy_text)
+
+    resources = [
+        build_fhir_allergy_intolerance(user_id, allergy)
+        for allergy in selected_allergies
+    ]
 
     return jsonify({
         "resourceType": "Bundle",
-        "type": "collection",
-        "entry": [
-            {"resource": allergy}
-            for allergy in allergies
-        ]
+        "type": "searchset",
+        "entry": [{"resource": resource} for resource in resources]
     })
+
+
 
 @app.route("/fhir/MedicationRequest", methods=["GET"])
 def get_fhir_medication_requests():
@@ -988,6 +998,8 @@ def search_pharmacies():
             "error": "Could not reach Google Places API.",
             "details": str(e)
         }), 502
+
+
 
 
 init_db()

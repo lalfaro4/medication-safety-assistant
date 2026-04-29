@@ -196,6 +196,8 @@ function App() {
   const latestSearchRequestRef = useRef(0);
   const [expandedCompareLabels, setExpandedCompareLabels] = useState({});
 
+  const [knownAllergies, setKnownAllergies] = useState([]);
+
   const [profile, setProfile] = useState({
     name: "",
     age: "",
@@ -959,6 +961,36 @@ function App() {
     setProfileMessage("Favorite pharmacy cleared. Click Save Profile to keep this change.");
   };
 
+  const loadKnownAllergies = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/allergies`, {
+        credentials: "include"
+      });
+
+      const contentType = res.headers.get("content-type") || "";
+      let data;
+
+      if (contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(`Expected JSON, got: ${text.slice(0, 200)}`);
+      }
+
+      if (!res.ok) {
+        throw new Error(data.error || "Could not load allergies.");
+      }
+
+      setKnownAllergies(data.allergies || []);
+    } catch (err) {
+      console.error("Could not load allergies:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadKnownAllergies();
+  }, [loadKnownAllergies]);
+
 
 
 if (!authChecked) {
@@ -1304,15 +1336,44 @@ if (!loggedIn) {
 
                 <div className="mb-3">
                   <label className="form-label">Allergies</label>
-                  <textarea
-                    className="form-control"
-                    rows="2"
-                    value={profile.allergies}
-                    onChange={(e) =>
-                      setProfile((prev) => ({ ...prev, allergies: e.target.value }))
-                    }
-                    placeholder="Example: penicillin, peanuts"
-                  />
+                  <div className="border rounded p-3" style={{ maxHeight: "260px", overflowY: "auto" }}>
+                    {knownAllergies.map((allergy) => {
+                      const selectedAllergies = profile.allergies
+                        ? profile.allergies.split(",").map((a) => a.trim()).filter(Boolean)
+                        : [];
+
+                      const isChecked = selectedAllergies.includes(allergy.display);
+
+                      return (
+                        <div key={allergy.id} className="form-check">
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            id={`allergy-${allergy.id}`}
+                            checked={isChecked}
+                            onChange={(e) => {
+                              let updated;
+
+                              if (e.target.checked) {
+                                updated = [...selectedAllergies, allergy.display];
+                              } else {
+                                updated = selectedAllergies.filter((a) => a !== allergy.display);
+                              }
+
+                              setProfile((prev) => ({
+                                ...prev,
+                                allergies: updated.join(", ")
+                              }));
+                            }}
+                          />
+                          <label className="form-check-label" htmlFor={`allergy-${allergy.id}`}>
+                            {allergy.display}
+                            <span className="text-muted ms-2">({allergy.category})</span>
+                          </label>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 <div className="mb-3">

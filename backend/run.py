@@ -1,6 +1,8 @@
 import re
 
 from flask import Flask, jsonify, request, session
+import jwt
+from functools import wraps
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 import requests
@@ -18,6 +20,7 @@ app = Flask(__name__)
 ENV = os.environ.get("APP_ENV", "production")
 
 IS_LOCAL = ENV == "local"
+JWT_SECRET = os.environ.get("JWT_SECRET", app.config["SECRET_KEY"])
 
 FRONTEND_ORIGIN = os.environ.get(
     "FRONTEND_ORIGIN",
@@ -139,6 +142,24 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+def create_token(user_id):
+    return jwt.encode({"user_id": user_id}, JWT_SECRET, algorithm="HS256")
+
+
+def get_logged_in_user():
+    auth_header = request.headers.get("Authorization", "")
+
+    if auth_header.startswith("Bearer "):
+        token = auth_header.replace("Bearer ", "", 1)
+
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            return payload.get("user_id")
+        except jwt.InvalidTokenError:
+            return None
+
+    return session.get("user_id")
 
 
 def check_new_medication_against_saved(new_med_name, new_med_id, user_id):
@@ -286,6 +307,18 @@ def login():
     session.clear()
     session["user_id"] = user["id"]
 
+    token = create_token(user["id"])
+
+    return jsonify({
+        "message": "Login successful.",
+        "token": token,
+        "user": {
+            "id": user["id"],
+            "name": user["name"],
+            "email": user["email"]
+        }
+    })
+
     if user:
         return jsonify({
             "message": "Login successful.",
@@ -304,7 +337,8 @@ def logout():
 
 @app.route("/api/me", methods=["GET"])
 def me():
-    user_id = session.get("user_id")
+    # user_id = session.get("user_id")
+    user_id = get_logged_in_user()
     if not user_id:
         return jsonify({"authenticated": False}), 401
 
@@ -316,7 +350,7 @@ def me():
     conn.close()
 
     if not user:
-        session.clear()
+        # session.clear()
         return jsonify({"authenticated": False}), 401
 
     return jsonify({"authenticated": True, "user": dict(user)})

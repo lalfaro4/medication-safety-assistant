@@ -230,7 +230,7 @@ function App() {
       setProfileMessage("");
 
       const res = await fetch(`${API_BASE}/api/profile`, {
-        credentials: "include"
+        headers: authHeaders()
       });
 
       const contentType = res.headers.get("content-type") || "";
@@ -268,7 +268,7 @@ function App() {
     try {
       const res = await fetch(
         `${API_BASE}/api/medications/${medicationId}/schedule`,
-        { credentials: "include" }
+        { headers: authHeaders()}
       );
 
       const data = await res.json();
@@ -289,7 +289,7 @@ function App() {
   const loadMedications = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/medications`, {
-        credentials: "include"
+        headers: authHeaders()
       });
       const data = await res.json();
 
@@ -324,7 +324,7 @@ function App() {
         console.log("API_BASE:", API_BASE);
         console.log("Calling:", `${API_BASE}/api/me`);
         const response = await fetch(`${API_BASE}/api/me`, {
-          credentials: "include"
+          headers: authHeaders(),
         });
         const data = await response.json();
 
@@ -402,6 +402,15 @@ function App() {
     return () => clearTimeout(splashTimer);
   }, [loggedIn, currentUser]);
 
+  function authHeaders(extraHeaders = {}) {
+  const token = localStorage.getItem("dosewise_token");
+
+  return {
+    ...extraHeaders,
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  };
+}
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setError("");
@@ -413,7 +422,6 @@ function App() {
         headers: {
           "Content-Type": "application/json",
         },
-        credentials: "include",
         body: JSON.stringify({ email, password }),
       });
 
@@ -425,6 +433,7 @@ function App() {
         throw new Error(data.error || "Login failed.");
       }
 
+      localStorage.setItem("dosewise_token", data.token);
       setCurrentUser(data.user);
       setLoggedIn(true);
       setMessage(data.message || "Login successful.");
@@ -444,7 +453,6 @@ function App() {
         headers: {
           "Content-Type": "application/json",
         },
-        credentials: "include",
         body: JSON.stringify({ name, email, password }),
       });
 
@@ -469,8 +477,8 @@ function App() {
   const handleLogout = async () => {
     await fetch(`${API_BASE}/api/logout`, {
       method: "POST",
-      credentials: "include",
     })
+    localStorage.removeItem("dosewise_token");
     setLoggedIn(false);
     setCurrentUser(null);
     setEmail("");
@@ -570,10 +578,9 @@ function App() {
     try {
       const res = await fetch(`${API_BASE}/api/medications`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
+        headers: authHeaders({
+          "Content-Type": "application/json"
+        }),
         body: JSON.stringify(payload),
       });
 
@@ -607,7 +614,7 @@ function App() {
         `${API_BASE}/api/medications/${id}`,
         {
           method: "DELETE",
-          credentials: "include"
+          headers: authHeaders()
         }
       );
 
@@ -651,10 +658,9 @@ function App() {
     try {
       const res = await fetch(`${API_BASE}/api/medications/${medicationId}`, {
         method: "PATCH",
-        headers: {
+        headers: authHeaders({
           "Content-Type": "application/json"
-        },
-        credentials: "include",
+        }),
         body: JSON.stringify({
           dosage: form.dosage,
           notes: form.notes
@@ -839,10 +845,9 @@ function App() {
         `${API_BASE}/api/medications/${medicationId}/schedule`,
         {
           method: "POST",
-          headers: {
+          headers: authHeaders({
             "Content-Type": "application/json"
-          },
-          credentials: "include",
+          }),
           body: JSON.stringify({ day_of_week, time_of_day })
         }
       );
@@ -876,7 +881,7 @@ function App() {
         `${API_BASE}/api/medication-schedules/${scheduleId}`,
         {
           method: "DELETE",
-          credentials: "include"
+          headers: authHeaders()
         }
       );
 
@@ -895,36 +900,35 @@ function App() {
   };
 
   const handleSaveProfile = async () => {
-  setProfileLoading(true);
-  setError("");
-  setProfileMessage("");
+    setProfileLoading(true);
+    setError("");
+    setProfileMessage("");
 
-  try {
-    const res = await fetch(`${API_BASE}/api/profile`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      credentials: "include",
-      body: JSON.stringify(profile)
-    });
+    try {
+      const res = await fetch(`${API_BASE}/api/profile`, {
+        method: "PUT",
+        headers: authHeaders({
+          "Content-Type": "application/json"
+        }),
+        body: JSON.stringify(profile)
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    if (!res.ok) {
-      throw new Error(data.error || "Could not save profile.");
+      if (!res.ok) {
+        throw new Error(data.error || "Could not save profile.");
+      }
+
+      setProfile(data.profile);
+      setProfileMessage(data.message || "Profile saved successfully.");
+      await loadMedications();
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "Could not save profile.");
+    } finally {
+      setProfileLoading(false);
     }
-
-    setProfile(data.profile);
-    setProfileMessage(data.message || "Profile saved successfully.");
-    await loadMedications();
-  } catch (err) {
-    console.error(err);
-    setError(err.message || "Could not save profile.");
-  } finally {
-    setProfileLoading(false);
-  }
-};
+  };
 
   const handlePharmacySearch = async () => {
     if (!pharmacyQuery.trim()) {
@@ -939,7 +943,9 @@ function App() {
     try {
       const res = await fetch(
         `${API_BASE}/api/pharmacies/search?query=${encodeURIComponent(pharmacyQuery)}`,
-        { credentials: "include" }
+          {
+            headers: authHeaders()
+          }
       );
 
       const contentType = res.headers.get("content-type") || "";
@@ -993,7 +999,6 @@ function App() {
   const loadKnownAllergies = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/allergies`, {
-        credentials: "include"
       });
 
       const contentType = res.headers.get("content-type") || "";

@@ -1,3 +1,5 @@
+import re
+
 from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -6,9 +8,10 @@ import sqlite3
 from pathlib import Path
 import os
 import secrets
+import json
 from dotenv import load_dotenv
 load_dotenv()
-from known_allergies import KNOWN_ALLERGIES
+from known_allergies import KNOWN_ALLERGIES, MEDICATION_ALIASES
 
 app = Flask(__name__)
 
@@ -69,21 +72,27 @@ def init_db():
             password TEXT NOT NULL
         )
     """)
-    
+
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS medications (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        rxcui TEXT NOT NULL,
-        name TEXT NOT NULL,
-        tty TEXT,
-        synonym TEXT,
-        score TEXT,
-        dosage TEXT,
-        notes TEXT,
-        FOREIGN KEY (user_id) REFERENCES users(id),
-        UNIQUE(user_id, rxcui)
-    )
+        CREATE TABLE IF NOT EXISTS medications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            rxcui TEXT NOT NULL,
+            name TEXT NOT NULL,
+            tty TEXT,
+            synonym TEXT,
+            score TEXT,
+            dosage TEXT,
+            notes TEXT,
+            has_conflict INTEGER DEFAULT 0,
+            has_interaction_conflict INTEGER DEFAULT 0,
+            has_allergy_conflict INTEGER DEFAULT 0,
+            interaction_summary TEXT,
+            interaction_details TEXT,
+            allergy_summary TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            UNIQUE(user_id, rxcui)
+        )
     """)
 
     cursor.execute("""
@@ -379,6 +388,7 @@ def add_medication():
     dosage = data.get("dosage")
     notes = data.get("notes")
 
+
     print("PARSED VALUES:", user_id, rxcui, name)
 
     if not rxcui or not name:
@@ -398,6 +408,100 @@ def add_medication():
 
         interaction_check = check_new_medication_against_saved(name, new_id, user_id)
 
+        profile = cursor.execute("""
+            SELECT allergies
+            FROM user_profiles
+            WHERE user_id = ?
+            """, (user_id,)).fetchone()
+
+        # label_text = fetch_openfda_label_text(name)
+
+        allergy_text = profile["allergies"] if profile and profile["allergies"] else ""
+
+        local_allergy_warnings = check_medication_against_allergies(
+            {
+                "name": name,
+                "synonym": synonym,
+                "notes": notes or ""
+            },
+            allergy_text
+        )
+
+        allergy_objects = get_selected_allergy_objects(allergy_text)
+
+        label_allergy_warnings = []
+
+        try:
+            allergy_response = requests.post(
+                f"{COMPARE_API_BASE}/check-allergies",
+                json={
+                    "drug": name,
+                    "allergies": allergy_objects
+                },
+                timeout=15
+            )
+
+            if allergy_response.ok:
+                allergy_data = allergy_response.json()
+                label_allergy_warnings = allergy_data.get("allergyWarnings", [])
+        except requests.RequestException as e:
+            print("OpenFDA allergy check failed:", str(e))
+
+        combined_allergy_warnings = []
+        seen_warning_keys = set()
+
+        for warning in local_allergy_warnings + label_allergy_warnings:
+            key = (
+                (warning.get("allergy") or "").strip().lower(),
+                (warning.get("reason") or "").strip().lower()
+            )
+
+            if key in seen_warning_keys:
+                continue
+
+            seen_warning_keys.add(key)
+            combined_allergy_warnings.append(warning)
+
+        has_interaction_conflict = 0
+        has_allergy_conflict = 0
+        interaction_summary = None
+        allergy_summary = None
+        interaction_details = []
+
+        if interaction_check and interaction_check.get("interactionsFoundCount", 0) > 0:
+            has_interaction_conflict = 1
+
+            first_interaction = interaction_check.get("interactions", [])
+            if first_interaction:
+                first_item = first_interaction[0]
+                medication_name = first_item.get("medicationName", "another medication")
+                interaction_summary = f"Potential interaction with {medication_name}"
+
+        if combined_allergy_warnings:
+            has_allergy_conflict = 1
+            first_allergy = combined_allergy_warnings[0].get("allergy", "recorded allergy")
+            allergy_summary = f"Possible allergy concern: {first_allergy}"
+
+        cursor.execute("""
+                       UPDATE medications
+                       SET has_conflict             = ?,
+                           has_interaction_conflict = ?,
+                           has_allergy_conflict     = ?,
+                           interaction_summary      = ?,
+                           allergy_summary          = ?
+                       WHERE id = ?
+                       """, (
+                           1 if (has_interaction_conflict or has_allergy_conflict) else 0,
+                           has_interaction_conflict,
+                           has_allergy_conflict,
+                           interaction_summary,
+                           allergy_summary,
+                           new_id
+                       ))
+
+        conn.commit()
+
+        refresh_user_medication_conflicts(user_id)
         return jsonify({
             "message": "Medication saved successfully",
             "id": new_id,
@@ -411,7 +515,8 @@ def add_medication():
                 "dosage": dosage,
                 "notes": notes
             },
-            "interactionCheck": interaction_check
+            "interactionCheck": interaction_check,
+            "allergyWarnings": combined_allergy_warnings
         }), 201
 
     except sqlite3.IntegrityError:
@@ -557,7 +662,7 @@ def get_known_allergies():
 
 
 def get_selected_allergy_objects(allergy_text):
-    selected_names = [a.strip() for a in allergy_text.split(",") if a.strip()]
+    selected_names = parse_user_allergies(allergy_text)
     return [item for item in KNOWN_ALLERGIES if item["display"] in selected_names]
 
 @app.route("/fhir/AllergyIntolerance", methods=["GET"])
@@ -620,7 +725,7 @@ def get_medications():
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT id, user_id, rxcui, name, tty, synonym, score, dosage, notes
+        SELECT id, user_id, rxcui, name, tty, synonym, score, dosage, notes, has_conflict, has_interaction_conflict, has_allergy_conflict, interaction_summary, allergy_summary, interaction_details
         FROM medications
         WHERE user_id = ?
         ORDER BY id DESC
@@ -629,7 +734,11 @@ def get_medications():
     rows = cursor.fetchall()
     conn.close()
 
-    medications = [dict(row) for row in rows]
+    medications = []
+    for row in rows:
+        med = dict(row)
+        med["interaction_details"] = json.loads(med["interaction_details"]) if med.get("interaction_details") else []
+        medications.append(med)
 
     return jsonify({
         "medications": medications,
@@ -699,7 +808,7 @@ def delete_medication(medication_id):
     cursor.execute("DELETE FROM medications WHERE id = ? AND user_id = ?", (medication_id, user_id))
     conn.commit()
     conn.close()
-
+    refresh_user_medication_conflicts(user_id)
     return jsonify({"message": "Medication deleted successfully"})
 
 @app.route("/api/medications/<int:medication_id>/schedule", methods=["POST"])
@@ -822,6 +931,8 @@ def get_profile():
     conn = get_db_connection()
     cursor = conn.cursor()
 
+    user = cursor.execute("""SELECT name FROM users WHERE id = ?""", (user_id,)).fetchone()
+
     profile = cursor.execute("""
         SELECT id, user_id, name, age, allergies, conditions, notes,
                favorite_pharmacy_name, favorite_pharmacy_address,
@@ -835,7 +946,7 @@ def get_profile():
     if not profile:
         return jsonify({
             "profile": {
-                "name": "",
+                "name": user["name"] if user and user["name"] else "",
                 "age": "",
                 "allergies": "",
                 "conditions": "",
@@ -941,7 +1052,7 @@ def save_profile():
     """, (user_id,)).fetchone()
 
     conn.close()
-
+    refresh_user_medication_conflicts(user_id)
     return jsonify({
         "message": "Profile saved successfully.",
         "profile": dict(profile)
@@ -999,8 +1110,252 @@ def search_pharmacies():
             "details": str(e)
         }), 502
 
+@app.route("/api/debug-session", methods=["GET"])
+def debug_session():
+    return jsonify({
+        "session": dict(session),
+        "cookies": dict(request.cookies),
+        "origin": request.headers.get("Origin"),
+        "host": request.host,
+        "frontend_origin": FRONTEND_ORIGIN,
+        "is_local": IS_LOCAL,
+        "cookie_samesite": app.config.get("SESSION_COOKIE_SAMESITE"),
+        "cookie_secure": app.config.get("SESSION_COOKIE_SECURE"),
+    }), 200
+
+def normalize_text(value):
+    if not value:
+        return ""
+    value = value.lower().strip()
+    value = re.sub(r"[-_/(),]", " ", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+def expand_alias_terms(med_name, med_synonym=""):
+    med_name = normalize_text(med_name)
+    med_synonym = normalize_text(med_synonym)
+
+    alias_terms = set()
+
+    texts_to_check = [med_name]
+    if med_synonym:
+        texts_to_check.append(med_synonym)
+
+    for alias_key, mapped_terms in MEDICATION_ALIASES.items():
+        alias_key_normalized = normalize_text(alias_key)
+
+        for text in texts_to_check:
+            if text == alias_key_normalized:
+                alias_terms.update(mapped_terms)
+                alias_terms.add(alias_key_normalized)
+
+            elif re.search(rf"\b{re.escape(alias_key_normalized)}\b", text):
+                alias_terms.update(mapped_terms)
+                alias_terms.add(alias_key_normalized)
+
+    return sorted(alias_terms)
+
+def parse_user_allergies(allergy_text):
+    if not allergy_text:
+        return []
+
+    return [item.strip() for item in allergy_text.split(",") if item.strip()]
 
 
+def check_medication_against_allergies(medication, allergy_text, label_text=""):
+    selected_allergies = get_selected_allergy_objects(allergy_text)
+
+    med_name = (medication.get("name") or "").lower()
+    med_synonym = (medication.get("synonym") or "").lower()
+    med_notes = normalize_text(medication.get("notes"))
+    label_text = normalize_text(label_text)
+
+
+
+    alias_terms = expand_alias_terms(med_name, med_synonym)
+    searchable_text = " ".join(
+        part for part in [
+            med_name,
+            med_synonym,
+            med_notes,
+            " ".join(alias_terms),
+            label_text
+        ] if part
+    )
+
+    # print("SELECTED ALLERGIES:", selected_allergies)
+    # print("MED NAME:", med_name)
+    # print("MED SYNONYM:", med_synonym)
+    # print("ALIASES:", alias_terms)
+    # print("LABEL TEXT:", label_text[:300])
+    # print("SEARCHABLE TEXT:", searchable_text[:500])
+
+    warnings = []
+
+    for allergy in selected_allergies:
+        allergy_name = allergy["display"].lower()
+        category = allergy["category"]
+
+        if category == "drug":
+            if re.search(rf"\b{re.escape(allergy_name)}\b", searchable_text):
+                warnings.append({
+                    "allergy": allergy["display"],
+                    "category": category,
+                    "reason": f"Medication may conflict with recorded drug allergy: {allergy['display']}."
+                })
+
+
+        elif category == "food":
+            if re.search(rf"\b{re.escape(allergy_name)}\b", label_text):
+                warnings.append({
+                    "allergy": allergy["display"],
+                    "category": category,
+                    "reason": f"Allergy-related term '{allergy['display']}' was found in the medication label text."
+                })
+
+    # print("ALLERGY WARNINGS:", warnings)
+    return warnings
+
+
+
+
+def refresh_user_medication_conflicts(user_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    profile = cursor.execute("""
+        SELECT allergies
+        FROM user_profiles
+        WHERE user_id = ?
+    """, (user_id,)).fetchone()
+
+    allergy_text = profile["allergies"] if profile and profile["allergies"] else ""
+
+    medications = cursor.execute("""
+        SELECT id, name, synonym, notes
+        FROM medications
+        WHERE user_id = ?
+        ORDER BY id DESC
+    """, (user_id,)).fetchall()
+
+    meds = [dict(row) for row in medications]
+
+    cursor.execute("""
+        UPDATE medications
+        SET has_conflict = 0,
+            has_interaction_conflict = 0,
+            has_allergy_conflict = 0,
+            interaction_summary = NULL,
+            allergy_summary = NULL
+        WHERE user_id = ?
+    """, (user_id,))
+
+    conn.commit()
+
+    for med in meds:
+        med_id = med["id"]
+        name = med["name"]
+        synonym = med.get("synonym")
+        notes = med.get("notes") or ""
+
+        interaction_check = check_new_medication_against_saved(name, med_id, user_id)
+
+        has_interaction_conflict = 0
+        interaction_summary = None
+        interaction_details = []
+
+        if interaction_check and interaction_check.get("interactionsFoundCount", 0) > 0:
+            has_interaction_conflict = 1
+
+            interactions = interaction_check.get("interactions", [])
+            interaction_names = []
+
+            for item in interactions:
+                medication_name = item.get("medicationName")
+
+                if medication_name and medication_name not in interaction_names:
+                    interaction_names.append(medication_name)
+
+            interaction_details = interaction_names
+
+            if len(interaction_names) == 1:
+                interaction_summary = f"Potential interaction with {interaction_names[0]}"
+            else:
+                interaction_summary = f"Potential interactions with {len(interaction_names)} medications"
+
+        local_allergy_warnings = check_medication_against_allergies(
+            {
+                "name": name,
+                "synonym": synonym,
+                "notes": notes
+            },
+            allergy_text
+        )
+
+        allergy_objects = get_selected_allergy_objects(allergy_text)
+        label_allergy_warnings = []
+
+        try:
+            allergy_response = requests.post(
+                f"{COMPARE_API_BASE}/check-allergies",
+                json={
+                    "drug": name,
+                    "allergies": allergy_objects
+                },
+                timeout=15
+            )
+
+            if allergy_response.ok:
+                allergy_data = allergy_response.json()
+                label_allergy_warnings = allergy_data.get("allergyWarnings", [])
+        except requests.RequestException as e:
+            print("OpenFDA allergy check failed during refresh:", str(e))
+
+        combined_allergy_warnings = []
+        seen_warning_keys = set()
+
+        for warning in local_allergy_warnings + label_allergy_warnings:
+            key = (
+                (warning.get("allergy") or "").strip().lower(),
+                (warning.get("reason") or "").strip().lower()
+            )
+
+            if key in seen_warning_keys:
+                continue
+
+            seen_warning_keys.add(key)
+            combined_allergy_warnings.append(warning)
+
+        has_allergy_conflict = 1 if combined_allergy_warnings else 0
+        allergy_summary = None
+
+        if combined_allergy_warnings:
+            first_allergy = combined_allergy_warnings[0].get("allergy", "recorded allergy")
+            allergy_summary = f"Possible allergy concern: {first_allergy}"
+
+        has_conflict = 1 if (has_interaction_conflict or has_allergy_conflict) else 0
+
+        cursor.execute("""
+            UPDATE medications
+            SET has_conflict = ?,
+                has_interaction_conflict = ?,
+                has_allergy_conflict = ?,
+                interaction_summary = ?,
+                interaction_details = ?,
+                allergy_summary = ?
+            WHERE id = ?
+        """, (
+            has_conflict,
+            has_interaction_conflict,
+            has_allergy_conflict,
+            interaction_summary,
+            json.dumps(interaction_details),
+            allergy_summary,
+            med_id
+        ))
+
+    conn.commit()
+    conn.close()
 
 init_db()
 

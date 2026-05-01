@@ -189,6 +189,7 @@ function App() {
   const [medicationDetailsForm, setMedicationDetailsForm] = useState({});
   const [savingMedicationDetails, setSavingMedicationDetails] = useState({});
   const [expandedMedicationDetails, setExpandedMedicationDetails] = useState({});
+  const [lastAddedMedicationId, setLastAddedMedicationId] = useState(null);
   const [drugInfoByMedication, setDrugInfoByMedication] = useState({});
   const [loadingDrugInfo, setLoadingDrugInfo] = useState({});
   const [expandedDrugInfo, setExpandedDrugInfo] = useState({});
@@ -197,6 +198,10 @@ function App() {
   const [expandedCompareLabels, setExpandedCompareLabels] = useState({});
 
   const [knownAllergies, setKnownAllergies] = useState([]);
+  const [newAllergyWarnings, setNewAllergyWarnings] = useState([]);
+  const [expandedMedicationWarnings, setExpandedMedicationWarnings] = useState({});
+  const [addingMedication, setAddingMedication] = useState(null)
+  const [deletingMedication, setDeletingMedication] = useState(null)
 
   const [profile, setProfile] = useState({
     name: "",
@@ -479,6 +484,8 @@ function App() {
     setExpandedDrugInfo({});
     setExpandedDrugInfoEntries({});
     setShowWelcomeSplash(false);
+    setNewAllergyWarnings([]);
+    setLastAddedMedicationId(null);
   };
 
   const handleSearch = async () => {
@@ -534,6 +541,9 @@ function App() {
     setError("");
     setMessage("");
     setNewInteractionReport(null);
+    setLastAddedMedicationId(null);
+    setNewAllergyWarnings([]);
+    setAddingMedication(med.rxcui)
 
     if (!currentUser?.id) {
       setError("No logged-in user found.");
@@ -566,17 +576,22 @@ function App() {
 
       setMessage(data.message || `${med.name} saved.`);
       setNewInteractionReport(data.interactionCheck || null);
+      setLastAddedMedicationId(data.id || null);
+      setNewAllergyWarnings(data.allergyWarnings || []);
 
       await loadMedications();
     } catch (err) {
       console.error(err);
       setError(err.message || "Something went wrong while saving.");
+    } finally {
+      setAddingMedication(null)
     }
   };
 
   const handleDeleteMedication = async (id) => {
     setError("");
     setMessage("");
+    setDeletingMedication(id)
 
     try {
       const res = await fetch(
@@ -594,6 +609,10 @@ function App() {
       }
 
       setMessage(data.message || "Medication deleted successfully.");
+      setLastAddedMedicationId(null);
+      setNewAllergyWarnings([]);
+      setNewInteractionReport(null);
+      setDeletingMedication(null)
       await loadMedications();
     } catch (err) {
       console.error(err);
@@ -889,6 +908,7 @@ function App() {
 
     setProfile(data.profile);
     setProfileMessage(data.message || "Profile saved successfully.");
+    await loadMedications();
   } catch (err) {
     console.error(err);
     setError(err.message || "Could not save profile.");
@@ -990,6 +1010,14 @@ function App() {
   useEffect(() => {
     loadKnownAllergies();
   }, [loadKnownAllergies]);
+
+  const toggleMedicationWarnings = (medId, type) => {
+    const key = `${medId}-${type}`;
+    setExpandedMedicationWarnings((prev) => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
 
 
 
@@ -1290,6 +1318,30 @@ if (!loggedIn) {
             </div>
           )}
 
+         {newAllergyWarnings.length > 0 && (
+             <div className="alert alert-danger mt-4">
+               <h5 className="mb-3">Possible allergy concern</h5>
+
+               {lastAddedMedicationId && (
+                   <button
+                       type="button"
+                       className="btn btn-sm btn-outline-danger mb-3"
+                       onClick={() => handleDeleteMedication(lastAddedMedicationId)}
+                   >
+                     Remove Newly Added Medication
+                   </button>
+               )}
+
+               <ul className="mb-0">
+                 {newAllergyWarnings.map((item, idx) => (
+                     <li key={idx}>
+                       <strong>{item.allergy}</strong>: {item.reason}
+                     </li>
+                 ))}
+               </ul>
+             </div>
+         )}
+
           {currentView === "profile" ? (
             <>
               <button
@@ -1529,9 +1581,59 @@ if (!loggedIn) {
                     const isDetailsExpanded = Boolean(expandedMedicationDetails[med.id]);
 
                     return (
-                      <div key={med.id} className="med-card">
+                      <div key={med.id} className={`med-card ${med.has_conflict ? "med-card-conflict" : ""}`}>
                         <div>
                           <h3 className="med-name">{med.name}</h3>
+                          <div className="med-warning-badges mt-2">
+                            {Number(med.has_interaction_conflict) === 1 && (
+                              <button
+                                type="button"
+                                className="warning-badge interaction-badge"
+                                title={med.interaction_summary || "Potential interaction warning"}
+                                onClick={() => toggleMedicationWarnings(med.id, "interaction")}
+                              >
+                                Interaction
+                              </button>
+                            )}
+
+                            {Number(med.has_allergy_conflict) === 1 && (
+                              <button
+                                type="button"
+                                className="warning-badge allergy-badge"
+                                title={med.allergy_summary || "Possible allergy concern"}
+                                onClick={() => toggleMedicationWarnings(med.id, "allergy")}
+                              >
+                                Allergy
+                              </button>
+                            )}
+                          </div>
+                          {expandedMedicationWarnings[`${med.id}-interaction`] && (
+                            <div className="med-warning-detail-box mt-2">
+                              <strong>Interaction warning:</strong>
+                              <ul className="mb-0 mt-1">
+                                {med.interaction_details?.length > 0 ? (
+                                  med.interaction_details.map((detail, idx) => (
+                                    <li key={idx}>Potential interaction with {detail}</li>
+                                  ))
+                                ) : (
+                                  <li>{med.interaction_summary || "Potential interaction detected."}</li>
+                                )}
+                              </ul>
+                            </div>
+                          )}
+                          {expandedMedicationWarnings[`${med.id}-allergy`] && (
+                            <div className="med-warning-detail-box mt-2">
+                              <strong>Allergy warning:</strong>
+                              <div className="mt-1">
+                                {med.allergy_summary || "Possible allergy concern detected."}
+                              </div>
+                            </div>
+                          )}
+                          {med.conflict_summary && (
+                            <div className="med-conflict-summary mt-2">
+                              {med.conflict_summary}
+                            </div>
+                          )}
                           <div className="med-meta">RxCUI: {med.rxcui}</div>
                           {med.synonym && <div className="med-meta">Synonym: {med.synonym}</div>}
                           {med.tty && <div className="med-meta">Type: {med.tty}</div>}
@@ -1824,8 +1926,9 @@ if (!loggedIn) {
                         <button
                           className="btn btn-delete"
                           onClick={() => handleDeleteMedication(med.id)}
+                          disabled={deletingMedication === med.id}
                         >
-                          Delete
+                          {deletingMedication === med.id ? "Deleting medication..." : "Delete"}
                         </button>
                       </div>
                     );
@@ -1860,8 +1963,12 @@ if (!loggedIn) {
                   {med.tty && <div className="result-meta">Type: {med.tty}</div>}
                 </div>
 
-                <button className="btn btn-add" onClick={() => handleAddMedication(med)}>
-                  Add
+                <button
+                  className="btn btn-add"
+                  onClick={() => handleAddMedication(med)}
+                  disabled={addingMedication === med.rxcui}
+                >
+                  {addingMedication === med.rxcui ? "Reviewing warnings..." : "Add"}
                 </button>
               </div>
             ))}

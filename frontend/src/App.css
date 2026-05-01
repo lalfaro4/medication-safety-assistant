@@ -598,6 +598,67 @@ textarea.form-control {
   transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
 }
 
+.med-card-conflict {
+  background: rgba(188, 44, 44, 0.37);
+  border: 1px solid #e66531;
+  /*border: 1px solid #cdb7ae;*/
+}
+
+.med-card-conflict .med-name {
+  color: #4f3a34;
+}
+
+.med-card-conflict .med-meta {
+  color: #78635d;
+}
+
+.med-card-conflict .med-detail-toggle-btn,
+.med-card-conflict .med-info-toggle-btn,
+.med-card-conflict .btn-outline-secondary,
+.med-card-conflict .btn-outline-info,
+.med-card-conflict .btn-outline-success {
+  background: #ead9bf !important;
+  background-image: none !important;
+  border: 1px solid #d2bea0 !important;
+  color: #167d77 !important;
+  box-shadow: none !important;
+}
+
+.med-warning-badges {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.warning-badge {
+  border: none;
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.interaction-badge {
+  background: #fdda78;
+  color: #4e3b10;
+}
+
+.allergy-badge {
+  background: #fdda78;
+  color: #4e3b10;
+}
+
+.med-warning-detail-box {
+  background: rgba(255, 255, 255, 0.45);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  padding: 0.75rem 1rem;
+  color: #4f3a34;
+}
+
+
+
 .med-card:hover,
 .result-row:hover,
 .compare-card:hover {
@@ -1072,11 +1133,13 @@ li {
     display: block;
   }
 
-  .interaction-warning-summary {
-    display: block;
-  }
+  /*.interaction-warning-summary {*/
+  /*  display: block;*/
+  /*}*/
 
-  .interaction-details-toggle {
-    margin-top: 0.5rem;
-  }
+  /*.interaction-details-toggle {*/
+  /*  margin-top: 0.5rem;*/
+  /*}*/
+
+
 }

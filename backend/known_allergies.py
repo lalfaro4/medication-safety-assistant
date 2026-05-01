@@ -171,3 +171,40 @@ KNOWN_ALLERGIES = [
         "fhir_text": "Albuterol allergy"
     },
 ]
+
+MEDICATION_ALIASES = {
+    # Pain / fever
+    "tylenol": ["acetaminophen"],
+    "panadol": ["acetaminophen"],
+    "acetaminophen": ["tylenol", "panadol"],
+
+    "advil": ["ibuprofen"],
+    "motrin": ["ibuprofen"],
+    "ibuprofen": ["advil", "motrin"],
+
+    "aleve": ["naproxen"],
+    "naprosyn": ["naproxen"],
+    "naproxen": ["aleve", "naprosyn"],
+
+    "bayer": ["aspirin"],
+    "ecotrin": ["aspirin"],
+    "aspirin": ["bayer", "ecotrin"],
+
+    # Allergy
+    "benadryl": ["diphenhydramine"],
+    "diphenhydramine": ["benadryl"],
+
+    "zyrtec": ["cetirizine"],
+    "cetirizine": ["zyrtec"],
+
+    "claritin": ["loratadine"],
+    "loratadine": ["claritin"],
+
+    # Acid reflux
+    "pepcid": ["famotidine"],
+
+    # Blood pressure
+    "coumadin": ["warfarin"],
+    "jantoven": ["warfarin"],
+    "warfarin": ["coumadin", "jantoven"],
+}

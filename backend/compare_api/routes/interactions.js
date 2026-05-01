@@ -5,6 +5,16 @@ const { fetchDrugLabel } = require("../services/openfdaService");
 const { normalizeLabel } = require("../services/normalizeLabel");
 const { interpretLabel } = require("../services/interpretLabel");
 
+const ALLERGY_TERM_ALIASES = {
+  milk: ["milk", "milk protein", "milk proteins", "lactose", "lactose monohydrate"],
+  soybeans: ["soy", "soybean", "soybeans", "soy lecithin"],
+  peanuts: ["peanut", "peanuts", "peanut oil"],
+  shellfish: ["shellfish", "crustacean shellfish", "shrimp", "crab", "lobster"],
+  fish: ["fish"],
+  tree_nuts: ["tree nut", "tree nuts", "almond", "cashew", "walnut", "pecan", "pistachio", "hazelnut"],
+  latex: ["latex"]
+};
+
 function normalizeName(name) {
   return (name || "").toLowerCase().trim();
 }
@@ -231,6 +241,62 @@ function compareNormalizedLabels(drugAQuery, labelA, drugBQuery, labelB) {
   };
 }
 
+function textMentionsAllergy(textArray, allergyTerms) {
+  if (!Array.isArray(textArray) || textArray.length === 0) return false;
+
+  const combinedText = textArray.join(" ").toLowerCase();
+
+  return allergyTerms.some((term) => {
+    const cleaned = normalizeName(term);
+    return cleaned && combinedText.includes(cleaned);
+  });
+}
+
+function checkLabelForAllergies(normalizedLabel, allergies) {
+  const sections = normalizedLabel?.sections || {};
+
+  const searchableSections = [
+    ...(sections.boxedWarning || []),
+    ...(sections.contraindications || []),
+    ...(sections.warningsAndCautions || []),
+    ...(sections.warnings || []),
+    ...(sections.patientInformation || []),
+    ...(sections.patientCounselingInformation || []),
+    ...(sections.doNotUse || []),
+    ...(sections.askDoctor || []),
+    ...(sections.askDoctorOrPharmacist || []),
+    ...(sections.stopUse || []),
+    ...(sections.whenUsing || [])
+  ];
+
+  const matches = [];
+
+  for (const allergy of allergies || []) {
+    const display = allergy?.display || allergy;
+    const category = allergy?.category || "unknown";
+    const allergyId = allergy?.id || normalizeName(display);
+
+    if (!display) continue;
+
+    const termsToCheck =
+      ALLERGY_TERM_ALIASES[allergyId] ||
+      ALLERGY_TERM_ALIASES[normalizeName(display)] ||
+      [display];
+
+    const found = textMentionsAllergy(searchableSections, termsToCheck);
+
+    if (found) {
+      matches.push({
+        allergy: display,
+        category,
+        reason: `Allergy-related term '${display}' was found in the medication label text.`
+      });
+    }
+  }
+
+  return matches;
+}
+
 // GET /api/label-interactions?drug=ibuprofen
 router.get("/label-interactions", async (req, res) => {
   try {
@@ -251,6 +317,9 @@ router.get("/label-interactions", async (req, res) => {
     }
 
     const normalized = normalizeLabel(rawLabel);
+    console.log("DRUG QUERY:", drug);
+    console.log("MATCHED LABEL:", normalized.drug);
+    console.log("SECTIONS:", JSON.stringify(normalized.sections, null, 2));
     const interpretation = interpretLabel(normalized);
 
     return res.json({
@@ -362,6 +431,50 @@ router.get("/compare-drugs", async (req, res) => {
     console.error("Compare drugs route error:", error);
     return res.status(500).json({
       error: "Server error while comparing drugs."
+    });
+  }
+});
+
+router.post("/check-allergies", async (req, res) => {
+
+  try {
+    const { drug, allergies } = req.body || {};
+
+    if (!drug || !drug.trim()) {
+      return res.status(400).json({
+        error: "Missing drug in request body."
+      });
+    }
+
+    if (!Array.isArray(allergies)) {
+      return res.status(400).json({
+        error: "Allergies must be an array."
+      });
+    }
+
+    const rawLabel = await fetchDrugLabel(drug.trim());
+
+    if (!rawLabel) {
+      return res.status(404).json({
+        error: `No label found for drug: ${drug}`
+      });
+    }
+
+    const normalized = normalizeLabel(rawLabel);
+
+
+    const allergyWarnings = checkLabelForAllergies(normalized, allergies);
+
+    return res.json({
+      drugQuery: drug,
+      matchedLabel: normalized?.drug,
+      meta: normalized?.meta,
+      allergyWarnings
+    });
+  } catch (error) {
+    console.error("Check allergies route error:", error);
+    return res.status(500).json({
+      error: "Server error while checking allergies."
     });
   }
 });

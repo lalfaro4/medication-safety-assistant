@@ -331,9 +331,14 @@ function App() {
         if (response.ok && data.authenticated) {
           setCurrentUser(data.user);
           setLoggedIn(true);
+        } else {
+          setCurrentUser(null);
+          setLoggedIn(false);
         }
       } catch (err) {
         console.error("Session check failed:", err);
+        setCurrentUser(null);
+        setLoggedIn(false);
       } finally {
         setAuthChecked(true);
       }
@@ -449,6 +454,8 @@ function App() {
         throw new Error(data.error || "Registration failed.");
       }
 
+      setCurrentUser(data.user);
+      setLoggedIn(true);
       setMessage(data.message || "Account created successfully.");
       setIsRegistering(false);
       setName("");

@@ -233,7 +233,19 @@ def register():
             (name, email, password_hashed)
         )
         conn.commit()
-        return jsonify({"message": "Account successfully created."}), 201
+
+        user_id = cursor.lastrowid
+        session.clear()
+        session["user_id"] = user_id
+
+        return jsonify({
+            "message": "Account successfully created.",
+            "user": {
+                "id": user_id,
+                "name": name,
+                "email": email
+            }
+        }), 201
     except Exception:
         return jsonify({"error": "User with that email already exists."}), 400
     finally:

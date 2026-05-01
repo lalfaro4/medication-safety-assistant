@@ -156,6 +156,29 @@ function getDisplayProfileName(profileName, currentUser) {
   return profileName?.trim() || currentUser?.name || "there";
 }
 
+
+function validateRegistration(name, password) {
+  const trimmedName = name.trim();
+
+  if (trimmedName.length < 2) {
+    return "Name must be at least 2 characters long.";
+  }
+
+  if (trimmedName.length > 25) {
+    return "Name must be 25 characters or less.";
+  }
+
+  if (!/^[A-Za-z][A-Za-z\s'-]*$/.test(trimmedName)) {
+    return "Name can only contain letters, spaces, apostrophes, and hyphens.";
+  }
+
+  if (password.length < 8) {
+    return "Password must be at least 8 characters long.";
+  }
+  return null;
+}
+
+
 function App() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
@@ -447,6 +470,13 @@ function App() {
     setError("");
     setMessage("");
 
+    const validationError = validateRegistration(name, password);
+
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
     try {
       const response = await fetch(`${API_BASE}/api/register`, {
         method: "POST",
@@ -462,6 +492,11 @@ function App() {
         throw new Error(data.error || "Registration failed.");
       }
 
+      if (!data.token) {
+        throw new Error("Registration succeeded, but no login token was returned.");
+      }
+
+      localStorage.setItem("dosewise_token", data.token);
       setCurrentUser(data.user);
       setLoggedIn(true);
       setMessage(data.message || "Account created successfully.");

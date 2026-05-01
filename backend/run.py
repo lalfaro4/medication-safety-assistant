@@ -2,6 +2,8 @@ import re
 
 from flask import Flask, jsonify, request, session
 import jwt
+from datetime import datetime, timedelta, timezone
+
 from functools import wraps
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -19,8 +21,12 @@ app = Flask(__name__)
 
 ENV = os.environ.get("APP_ENV", "production")
 
+JWT_SECRET = os.environ.get("JWT_SECRET") or app.config["SECRET_KEY"]
+
+if not isinstance(JWT_SECRET, str) or not JWT_SECRET:
+    JWT_SECRET = "dev-only"
+
 IS_LOCAL = ENV == "local"
-JWT_SECRET = os.environ.get("JWT_SECRET", app.config["SECRET_KEY"])
 
 FRONTEND_ORIGIN = os.environ.get(
     "FRONTEND_ORIGIN",
@@ -144,7 +150,42 @@ def init_db():
     conn.close()
 
 def create_token(user_id):
-    return jwt.encode({"user_id": user_id}, JWT_SECRET, algorithm="HS256")
+    payload = {
+        "user_id": int(user_id),
+        "exp": datetime.now(timezone.utc) + timedelta(days=7)
+    }
+
+    token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+
+    if isinstance(token, bytes):
+        token = token.decode("utf-8")
+
+    return token
+
+def validate_name(name):
+    name = name.strip()
+
+    if len(name) < 2:
+        return "Name must be at least 2 characters long."
+
+    if len(name) > 25:
+        return "Name must be 25 characters or less."
+
+    if not re.match(r"^[A-Za-z][A-Za-z\s'-]*$", name):
+        return "Name can only contain letters, spaces, apostrophes, and hyphens."
+
+    return None
+
+
+def validate_password(password):
+    if len(password) < 8:
+        return "Password must be at least 8 characters long."
+
+    # if not re.search(r"\d", password):
+    #     return "Password must include at least one number."
+
+
+    return None
 
 
 def get_logged_in_user():
@@ -243,6 +284,15 @@ def register():
     if not name or not email or not password:
         return jsonify({"error": "All fields are required."}), 400
 
+    name_error = validate_name(name)
+    if name_error:
+        return jsonify({"error": name_error}), 400
+
+    password_error = validate_password(password)
+    if password_error:
+        return jsonify({"error": password_error}), 400
+
+
     password_hashed = generate_password_hash(password)
 
     conn = get_db_connection()
@@ -256,11 +306,13 @@ def register():
         conn.commit()
 
         user_id = cursor.lastrowid
-        session.clear()
-        session["user_id"] = user_id
+        token = create_token(user_id)
+        # session.clear()
+        # session["user_id"] = user_id
 
         return jsonify({
             "message": "Account successfully created.",
+            "token": token,
             "user": {
                 "id": user_id,
                 "name": name,
@@ -317,7 +369,7 @@ def login():
             "name": user["name"],
             "email": user["email"]
         }
-    })
+    }), 200
 
     if user:
         return jsonify({
@@ -337,8 +389,8 @@ def logout():
 
 @app.route("/api/me", methods=["GET"])
 def me():
-    # user_id = session.get("user_id")
     user_id = get_logged_in_user()
+
     if not user_id:
         return jsonify({"authenticated": False}), 401
 
@@ -350,14 +402,25 @@ def me():
     conn.close()
 
     if not user:
-        # session.clear()
         return jsonify({"authenticated": False}), 401
 
-    return jsonify({"authenticated": True, "user": dict(user)})
+    return jsonify({"authenticated": True, "user": dict(user)}), 200
 
 def get_logged_in_user():
-    user_id = session.get("user_id")
-    return user_id
+    auth_header = request.headers.get("Authorization", "")
+
+    if auth_header.startswith("Bearer "):
+        token = auth_header.replace("Bearer ", "", 1)
+
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            return payload.get("user_id")
+        except jwt.ExpiredSignatureError:
+            return None
+        except jwt.InvalidTokenError:
+            return None
+
+    return session.get("user_id")
 
 @app.route("/api/medications/search")
 def search_medications():

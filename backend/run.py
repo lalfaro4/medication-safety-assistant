@@ -258,9 +258,14 @@ def login():
     # if user is None or not check_password_hash(user["password"], password):
     #     return jsonify({"error": "Invalid email or password."}), 401
 
+    print("USER FOUND:", user is not None)
+
     if user is None:
         print("LOGIN FAILED: no user found for", email)
         return jsonify({"error": "Invalid email or password."}), 401
+
+    password_ok = check_password_hash(user["password"], password)
+    print("PASSWORD OK:", password_ok)
 
     if not check_password_hash(user["password"], password):
         print("LOGIN FAILED: bad password for", email)

@@ -255,7 +255,15 @@ def login():
 
     conn.close()
 
-    if user is None or not check_password_hash(user["password"], password):
+    # if user is None or not check_password_hash(user["password"], password):
+    #     return jsonify({"error": "Invalid email or password."}), 401
+
+    if user is None:
+        print("LOGIN FAILED: no user found for", email)
+        return jsonify({"error": "Invalid email or password."}), 401
+
+    if not check_password_hash(user["password"], password):
+        print("LOGIN FAILED: bad password for", email)
         return jsonify({"error": "Invalid email or password."}), 401
 
     session.clear()
@@ -1122,6 +1130,17 @@ def debug_session():
         "cookie_samesite": app.config.get("SESSION_COOKIE_SAMESITE"),
         "cookie_secure": app.config.get("SESSION_COOKIE_SECURE"),
     }), 200
+
+@app.route("/api/debug-users")
+def debug_users():
+    conn = get_db_connection()
+    rows = conn.execute("SELECT id, name, email FROM users").fetchall()
+    conn.close()
+
+    return jsonify({
+        "count": len(rows),
+        "users": [dict(row) for row in rows]
+    })
 
 def normalize_text(value):
     if not value:

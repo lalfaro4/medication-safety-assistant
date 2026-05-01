@@ -415,6 +415,8 @@ function App() {
       const data = await response.json();
 
       if (!response.ok) {
+        setLoggedIn(false);
+        setCurrentUser(null);
         throw new Error(data.error || "Login failed.");
       }
 
